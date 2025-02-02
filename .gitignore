@@ -109,3 +109,5 @@ ENV/
 .vscode/
 .idea/
 
+# ruff
+.ruff_cache/
