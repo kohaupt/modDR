@@ -111,3 +111,6 @@ ENV/
 
 # ruff
 .ruff_cache/
+
+# datasets
+/data/raw/*
