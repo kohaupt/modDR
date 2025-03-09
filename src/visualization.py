@@ -46,13 +46,13 @@ def display_reduction_results(results, figsize_columns, figsize=(15, 15)):
 def display_graphs(
     results,
     figsize_columns,
-    node_positions,
     labels,
     figsize=(15, 15),
     cmap=plt.cm.Accent,
     edge_cmap=plt.cm.plasma,
     show_cbar=True,
     cbar_labels=None,
+    show_edges=True,
 ):
     """
     Display the reduction results in a grid layout.
@@ -66,8 +66,6 @@ def display_graphs(
         figsize_columns (int): Number of columns which are used to layout the plotted graphs.
                                The number of rows is depending on the number of 'results' and
                                the given 'figsize_columns'.
-        node_positions (dict): Dictionary of positions keyed by node. The positions should be
-                               in the form {node: (x, y)}.
         labels (list or array, 2-dimensional is possible): List or array of node labels.
         figsize (tuple, optional): Adjusts the width/height of the individual graphs, in case
                                    the scaling is different for different computations. Default
@@ -96,10 +94,10 @@ def display_graphs(
     if len(results) == 1:
         nx.draw(
             results[0][1],
-            pos=results[0][3] if len(results[0]) > 3 else node_positions,
+            pos=results[0][3],
             node_size=30,
             node_color=labels if len(labels.shape) == 1 else labels[0],
-            edge_color=results[0][2],
+            edge_color=results[0][2] if show_edges else "white",
             edge_vmin=0,
             edge_vmax=1,
             width=0.4,
@@ -125,10 +123,10 @@ def display_graphs(
                 nx.draw(
                     results[i][1],
                     ax=axs[i],
-                    pos=results[i][3] if len(results[i]) > 3 else node_positions,
+                    pos=results[i][3],
                     node_size=30,
                     node_color=labels if len(labels.shape) == 1 else labels[i],
-                    edge_color=results[i][2],
+                    edge_color=results[i][2] if show_edges else "white",
                     edge_vmin=0,
                     edge_vmax=1,
                     width=0.4,
