@@ -176,40 +176,56 @@ def compute_jaccard_distances(umap_object, embedding_points, nhood_size=15):
 # -----------------------------------------------------------------------------
 
 
-def _nhood_search_unlimited(umap_object, data):
+def _nhood_search_unlimited(data):
     dmat = pairwise_distances(data)
     indices_sorted = np.argsort(dmat)
     # dists = dmat[indices_sorted]
 
     # return only the indices of the neighbors without distance from a point to itself
-    return indices_sorted[:, 1:]
+    indices_sorted_cleaned = np.empty((0, indices_sorted.shape[1] - 1), dtype=np.int32)
+
+    for i in range(indices_sorted.shape[0]):
+        indices_sorted_cleaned = np.vstack(
+            [indices_sorted_cleaned, indices_sorted[i][indices_sorted[i] != i]]
+        )
+
+    return indices_sorted_cleaned
 
 
 def compute_sequence_diff(reference_points, embedding_points, nhood_size=15):
-    highd_indices = _nhood_search_unlimited(reference_points, reference_points)
-    lowd_indices = _nhood_search_unlimited(reference_points, embedding_points)
+    highd_indices = _nhood_search_unlimited(reference_points)
+    lowd_indices = _nhood_search_unlimited(embedding_points)
 
     seq_diffs = np.zeros((embedding_points.shape[0]), dtype=np.float32)
+
+    # Iterate over all points in the low-dimensional space
     for i in range(embedding_points.shape[0]):
         sum_highd = 0.0
         sum_lowd = 0.0
-        for pos_index in range(nhood_size):
-            p_i2 = pos_index
 
-            p_in = np.where(highd_indices[i] == lowd_indices[i][pos_index])[0]
+        # Iterate over indices of nearest neighbors of the current point (in the low-dimensional space)
+        for pos_index in range(nhood_size):
+            # Calculate the high-dimensional position of the 'pos_index'-nearest-neighbor in the low-dimensional space
+            p_i2 = pos_index
+            dim_nn = np.where(highd_indices[i] == lowd_indices[i][pos_index])
+            assert len(dim_nn[0]) == 1, (
+                f"Point {i}: The {lowd_indices[i][pos_index]}-nearest neighbor was not assigned to exactly one match (index) in high-dimensional space."
+            )
+
+            p_in = dim_nn[0][0]
             sum_lowd += (nhood_size - p_i2) * np.abs(p_i2 - p_in)
 
-            p_i2 = np.where(lowd_indices[i] == highd_indices[i][pos_index])[0]
+            # Calculate the low-dimensional position of the 'pos_index'-nearest-neighbor in the high-dimensional space
             p_in = pos_index
+            dim_nn = np.where(highd_indices[i][pos_index] == lowd_indices[i])
+            assert len(dim_nn[0]) == 1, (
+                f"Point {i}: The {highd_indices[i][pos_index]}-nearest neighbor was not assigned to exactly one match (index) in low-dimensional space."
+            )
+
+            p_i2 = dim_nn[0][0]
             sum_highd += (nhood_size - p_in) * np.abs(p_i2 - p_in)
 
         seq_diffs[i] = 0.5 * sum_highd + 0.5 * sum_lowd
-
-    # tree = KDTree(embedding_points)
-    # lowd_dists, lowd_indices = tree.query(embedding_points, k=nhood_size)
-    # accuracy = _nhood_compare(
-    #     highd_indices.astype(np.int32), lowd_indices.astype(np.int32)
-    # )
 
     return seq_diffs
 
@@ -227,3 +243,74 @@ def pydrmetrics_report(highdim_data, lowdim_data):
 def pydrmetrics_plot_coranking_matrix(highdim_data, lowdim_data):
     drm = DRMetrics(highdim_data, lowdim_data)
     drm.plot_coranking_matrix()
+
+
+def metric_q_local(reference_points, embedding_points, nhood_size=15, metrics_obj=None):
+    if metrics_obj is None:
+        metrics_obj = DRMetrics(reference_points, embedding_points)
+
+    return metrics_obj.Qlocal
+
+
+def metric_trustworthiness(
+    reference_points, embedding_points, nhood_size=15, metrics_obj=None
+):
+    if metrics_obj is None:
+        metrics_obj = DRMetrics(reference_points, embedding_points)
+    return metrics_obj.T
+
+
+def metric_continuity(
+    reference_points, embedding_points, nhood_size=15, metrics_obj=None
+):
+    if metrics_obj is None:
+        metrics_obj = DRMetrics(reference_points, embedding_points)
+    return metrics_obj.C
+
+
+def metric_norm_stress(
+    reference_points, embedding_points, nhood_size=15, metrics_obj=None
+):
+    if metrics_obj is None:
+        metrics_obj = DRMetrics(reference_points, embedding_points)
+
+    return 0
+
+
+def metric_spearman(
+    reference_points, embedding_points, nhood_size=15, metrics_obj=None
+):
+    if metrics_obj is None:
+        metrics_obj = DRMetrics(reference_points, embedding_points)
+
+    return metrics_obj.Vrs
+
+
+def metric_total_score(
+    reference_points, embedding_points, nhood_size=15, weights=None, metrics_obj=None
+):
+    n_metrics = 5
+
+    if weights is None:
+        weights = [1, 1, 1, 1, 1]
+
+    assert len(weights) == n_metrics, (
+        "The number of weights must match the number of metrics."
+    )
+
+    m_ql = metric_q_local(reference_points, embedding_points, nhood_size, metrics_obj)
+    m_t = metric_trustworthiness(
+        reference_points, embedding_points, nhood_size, metrics_obj
+    )
+    m_c = metric_continuity(reference_points, embedding_points, nhood_size, metrics_obj)
+    m_ns = 1 - metric_norm_stress(
+        reference_points, embedding_points, nhood_size, metrics_obj
+    )
+    m_s = metric_spearman(reference_points, embedding_points, nhood_size, metrics_obj)
+
+    metrics_list = [m_ql, m_t, m_c, m_ns, m_s]
+    m_total = 0
+    for i in range(n_metrics):
+        m_total += weights[i] * metrics_list[i]
+
+    return m_total / n_metrics
