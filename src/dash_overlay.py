@@ -3,17 +3,23 @@ from dataclasses import dataclass
 import plotly.express as px
 from dash import Dash, Input, Output, callback, dcc, html
 
+from embedding_obj import EmbeddingObj
+
 
 @dataclass
 class DashOverlay:
     external_stylesheets = ["https://codepen.io/chriddyp/pen/bWLwgP.css"]
-    data: list
-    iterations: list
-    color_range: list
+    data: list[EmbeddingObj]
+    iterations: list[int]
+    color_range: list[float]
 
-    def __init__(self, data, iterations):
+    def __init__(self, data):
         self.data = data
-        self.iterations = iterations
+
+        self.iterations = []
+        for d in data:
+            self.iterations.append(d.marker)
+
         self.color_range = self.compute_color_scale()
         self.instanciate_dash()
 
@@ -51,11 +57,9 @@ class DashOverlay:
         )
         def update_graph(iteration_value):
             fig = px.scatter(
-                x=self.data[self.iterations.index(iteration_value)].loc[:, "x"],
-                y=self.data[self.iterations.index(iteration_value)].loc[:, "y"],
-                color=self.data[self.iterations.index(iteration_value)][
-                    "metrics_score"
-                ],
+                x=self.data[self.iterations.index(iteration_value)].embedding[:, 0],
+                y=self.data[self.iterations.index(iteration_value)].embedding[:, 1],
+                color=self.data[self.iterations.index(iteration_value)].m_jaccard,
                 color_continuous_scale="inferno",
                 range_color=self.color_range,
                 labels={"color": "Metrics Score"},
@@ -70,7 +74,7 @@ class DashOverlay:
     def compute_color_scale(self):
         scores = []
         for i in range(len(self.data)):
-            scores.extend(self.data[i]["metrics_score"].values)
+            scores.extend(self.data[i].m_jaccard)
 
         return [min(scores), max(scores)]
 

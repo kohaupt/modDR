@@ -150,8 +150,8 @@ def _nhood_compare(indices_left, indices_right):
     return result
 
 
-def _nhood_search(umap_object, nhood_size):
-    dmat = pairwise_distances(umap_object._raw_data)
+def _nhood_search(highd_data, nhood_size):
+    dmat = pairwise_distances(highd_data)
     indices = np.argpartition(dmat, nhood_size)[:, :nhood_size]
     dmat_shortened = submatrix(dmat, indices, nhood_size)
 
@@ -162,10 +162,10 @@ def _nhood_search(umap_object, nhood_size):
     return indices, dists
 
 
-def compute_jaccard_distances(umap_object, embedding_points, nhood_size=15):
-    highd_indices, highd_dists = _nhood_search(umap_object, nhood_size)
-    tree = KDTree(embedding_points)
-    lowd_dists, lowd_indices = tree.query(embedding_points, k=nhood_size)
+def compute_jaccard_distances(highd_data, lowd_points, nhood_size=15):
+    highd_indices, highd_dists = _nhood_search(highd_data, nhood_size)
+    tree = KDTree(lowd_points)
+    lowd_dists, lowd_indices = tree.query(lowd_points, k=nhood_size)
     accuracy = _nhood_compare(
         highd_indices.astype(np.int32), lowd_indices.astype(np.int32)
     )
@@ -230,8 +230,12 @@ def compute_sequence_diff(reference_points, embedding_points, nhood_size=15):
     return seq_diffs
 
 
-def compute_sequence_change(sequence_diff_start, sequence_diff_mod):
+def compute_sequence_change(sequence_diff_start, sequence_diff_mod, allow_neg=True):
     sequence_diff_change = sequence_diff_mod - sequence_diff_start
+
+    if allow_neg:
+        return sequence_diff_change
+
     return [x if x > 0 else 0 for x in sequence_diff_change]
 
 
@@ -245,7 +249,7 @@ def pydrmetrics_plot_coranking_matrix(highdim_data, lowdim_data):
     drm.plot_coranking_matrix()
 
 
-def metric_q_local(reference_points, embedding_points, nhood_size=15, metrics_obj=None):
+def metric_q_local(reference_points, embedding_points, nhood_size=5, metrics_obj=None):
     if metrics_obj is None:
         metrics_obj = DRMetrics(reference_points, embedding_points)
 
@@ -253,7 +257,7 @@ def metric_q_local(reference_points, embedding_points, nhood_size=15, metrics_ob
 
 
 def metric_trustworthiness(
-    reference_points, embedding_points, nhood_size=15, metrics_obj=None
+    reference_points, embedding_points, nhood_size=5, metrics_obj=None
 ):
     if metrics_obj is None:
         metrics_obj = DRMetrics(reference_points, embedding_points)
@@ -261,7 +265,7 @@ def metric_trustworthiness(
 
 
 def metric_continuity(
-    reference_points, embedding_points, nhood_size=15, metrics_obj=None
+    reference_points, embedding_points, nhood_size=5, metrics_obj=None
 ):
     if metrics_obj is None:
         metrics_obj = DRMetrics(reference_points, embedding_points)
@@ -269,7 +273,7 @@ def metric_continuity(
 
 
 def metric_norm_stress(
-    reference_points, embedding_points, nhood_size=15, metrics_obj=None
+    reference_points, embedding_points, nhood_size=5, metrics_obj=None
 ):
     if metrics_obj is None:
         metrics_obj = DRMetrics(reference_points, embedding_points)
@@ -277,9 +281,7 @@ def metric_norm_stress(
     return 0
 
 
-def metric_spearman(
-    reference_points, embedding_points, nhood_size=15, metrics_obj=None
-):
+def metric_spearman(reference_points, embedding_points, nhood_size=5, metrics_obj=None):
     if metrics_obj is None:
         metrics_obj = DRMetrics(reference_points, embedding_points)
 
@@ -287,7 +289,7 @@ def metric_spearman(
 
 
 def metric_total_score(
-    reference_points, embedding_points, nhood_size=15, weights=None, metrics_obj=None
+    reference_points, embedding_points, nhood_size=5, weights=None, metrics_obj=None
 ):
     n_metrics = 5
 
