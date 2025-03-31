@@ -38,12 +38,14 @@ def generate_pairwise_threshold_graphs(
 def compute_force_directed(
     graph: networkx.Graph,
     iterations: int,
-    initial_pos: dict[int, np.array] = None,
+    initial_pos: np.array,
     threshold: int = 0.0001,
 ) -> np.ndarray:
+    embedding_dict = {i: initial_pos[i] for i in range(len(initial_pos))}
+
     pos_dict = nx.spring_layout(
         graph,
-        pos=initial_pos,
+        pos=embedding_dict,
         iterations=iterations,
         threshold=threshold,
     )
@@ -53,9 +55,9 @@ def compute_force_directed(
 
 def compute_iterations(
     graph: networkx.Graph,
+    initial_pos: np.array,
     iterations: list[int],
     method: str = "force-directed",
-    initial_pos: dict[int, np.array] = None,
 ) -> list[EmbeddingObj]:
     embeddings = []
 
@@ -103,3 +105,19 @@ def compute_knn(
         knn_graph_nx[u][v]["weight"] = pairwise_dists[u][v]
 
     return knn_graph_nx, edge_weights_knn
+
+
+def fit(
+    data: pandas.DataFrame,
+    initial_pos: np.ndarray,
+    features: list[str],
+    method: str = "force-directed",
+    n_neighbors: int = 3,
+    iterations: list[int] = None,
+) -> list[EmbeddingObj]:
+    if iterations is None:
+        iterations = [1, 3, 5, 10]
+    graph, edge_weights = compute_knn(data, features, n_neighbors)
+
+    embeddings = compute_iterations(graph, initial_pos, iterations, method=method)
+    return embeddings

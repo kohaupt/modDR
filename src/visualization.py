@@ -49,8 +49,8 @@ def display_reduction_results(results, figsize_columns, figsize=(15, 15)):
 
 def display_graphs(
     results: list[EmbeddingObj],
-    figsize_columns: int,
     labels: np.ndarray,
+    figsize_columns: int = 2,
     figsize: tuple[int, int] = (15, 15),
     cmap: plt.cm = plt.cm.Accent,
     edge_cmap: plt.cm = plt.cm.plasma,
