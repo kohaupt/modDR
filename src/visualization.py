@@ -1,32 +1,18 @@
 import math
-from typing import Optional
+from typing import Any, Optional
 
 import matplotlib.pyplot as plt
 import networkx as nx
-import numpy as np
+import numpy.typing as npt
 
-from embedding_obj import EmbeddingObj
+from embedding_obj import EmbeddingObj  # type: ignore
 
 
-def display_reduction_results(results, figsize_columns, figsize=(15, 15)):
-    """
-    Display the reduction results in a grid layout.
-
-    Parameters:
-        results (list of tuples): Computation results as an array of tuples with the form
-                                  [("<<plot title>>", [<<2-dimensional array>>])], where the
-                                  2-dimensional array describes the x- & y-position of each
-                                  data point & the title should describe the chosen parameter-values.
-        figsize_columns (int): Number of columns which are used to layout the plotted graphs.
-                               The number of rows is depending on the number of 'results' and
-                               the given 'figsize_columns'.
-        figsize (tuple, optional): Adjusts the width/height of the individual graphs, in case
-                                   the scaling is different for different computations. Default
-                                   is (15, 15).
-
-    Returns:
-        None
-    """
+def display_reduction_results(
+    results: list[EmbeddingObj],
+    figsize_columns: int,
+    figsize: tuple[int, int] = (15, 15),
+) -> None:
     figsize_rows = math.ceil(len(results) / figsize_columns)
     fig = plt.subplots(figsize_rows, figsize_columns, figsize=figsize)
     # fig.tight_layout(pad=3)
@@ -49,7 +35,7 @@ def display_reduction_results(results, figsize_columns, figsize=(15, 15)):
 
 def display_graphs(
     results: list[EmbeddingObj],
-    labels: np.ndarray,
+    labels: npt.NDArray[Any],
     figsize_columns: int = 2,
     figsize: tuple[int, int] = (15, 15),
     cmap: plt.cm = plt.cm.Accent,

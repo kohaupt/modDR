@@ -1,28 +1,19 @@
-import networkx
+from typing import Any, Optional
+
 import networkx as nx
 import numpy as np
-import pandas
-from sklearn.metrics import pairwise_distances
-from sklearn.neighbors import kneighbors_graph
-from sklearn.preprocessing import MinMaxScaler
+import numpy.typing as npt
+import pandas as pd
+from sklearn.metrics import pairwise_distances  # type: ignore
+from sklearn.neighbors import kneighbors_graph  # type: ignore
+from sklearn.preprocessing import MinMaxScaler  # type: ignore
 
-from embedding_obj import EmbeddingObj
+from embedding_obj import EmbeddingObj  # type: ignore
 
 
 def generate_pairwise_threshold_graphs(
-    similarity_matrix: np.array, threshold: float
-) -> tuple[networkx.Graph, np.array]:
-    """
-    Generate pairwise threshold graphs from a similarity matrix.
-
-    Parameters:
-        similarity_matrix: A 2 dimensional array representing the similarity matrix.
-        threshold (float): The threshold value to determine the relevant edges in the graph. Values
-                           below the threshold will be set to 0.
-
-    Returns:
-        tuple: A tuple containing the generated graph (networkx.Graph) and an array of edge weights.
-    """
+    similarity_matrix: npt.NDArray[np.float32], threshold: float
+) -> tuple[nx.Graph, list[dict[str, Any]]]:
     for i in range(len(similarity_matrix)):
         similarity_matrix[i] = [
             x if x >= threshold else 0 for x in similarity_matrix[i]
@@ -36,11 +27,11 @@ def generate_pairwise_threshold_graphs(
 
 
 def compute_force_directed(
-    graph: networkx.Graph,
+    graph: nx.Graph,
     iterations: int,
-    initial_pos: np.array,
-    threshold: int = 0.0001,
-) -> np.ndarray:
+    initial_pos: npt.NDArray[np.float32],
+    threshold: float = 0.0001,
+) -> npt.NDArray[np.float32]:
     embedding_dict = {i: initial_pos[i] for i in range(len(initial_pos))}
 
     pos_dict = nx.spring_layout(
@@ -54,15 +45,15 @@ def compute_force_directed(
 
 
 def compute_iterations(
-    graph: networkx.Graph,
-    initial_pos: np.array,
+    graph: nx.Graph,
+    initial_pos: npt.NDArray[np.float32],
     iterations: list[int],
     method: str = "force-directed",
 ) -> list[EmbeddingObj]:
     embeddings = []
 
     for iteration in iterations:
-        emb = EmbeddingObj(graph)
+        emb = EmbeddingObj(graph, initial_pos, np.array([]))
 
         if method == "force-directed":
             emb.embedding = compute_force_directed(graph, iteration, initial_pos)
@@ -74,8 +65,10 @@ def compute_iterations(
     return embeddings
 
 
-def compute_pairwise_dist(df: pandas.DataFrame, sim_features: list[str]) -> np.ndarray:
-    connectivity_saturation_pairwise = np.float16(
+def compute_pairwise_dist(
+    df: pd.DataFrame, sim_features: list[str]
+) -> npt.NDArray[np.float32]:
+    connectivity_saturation_pairwise = np.float32(
         pairwise_distances(df.loc[:, sim_features], metric="manhattan")
     )
 
@@ -87,11 +80,11 @@ def compute_pairwise_dist(df: pandas.DataFrame, sim_features: list[str]) -> np.n
 
 
 def compute_knn(
-    df: pandas.DataFrame,
+    df: pd.DataFrame,
     sim_features: list[str],
     n_neighbors: int = 3,
     mode: str = "distance",
-) -> tuple[nx.Graph, np.ndarray]:
+) -> tuple[nx.Graph, npt.NDArray[np.float32]]:
     knn_graph = kneighbors_graph(
         df.loc[:, sim_features], n_neighbors=n_neighbors, mode=mode
     )
@@ -108,13 +101,14 @@ def compute_knn(
 
 
 def fit(
-    data: pandas.DataFrame,
-    initial_pos: np.ndarray,
+    data: pd.DataFrame,
+    initial_pos: npt.NDArray[np.float32],
     features: list[str],
     method: str = "force-directed",
     n_neighbors: int = 3,
-    iterations: list[int] = None,
+    iterations: Optional[list[int]] = None,
 ) -> list[EmbeddingObj]:
+    # TODO: Add assertion for falsy parameters
     if iterations is None:
         iterations = [1, 3, 5, 10]
     graph, edge_weights = compute_knn(data, features, n_neighbors)

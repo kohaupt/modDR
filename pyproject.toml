@@ -45,6 +45,9 @@ package-dir = { "" = "src" }
 # Ruff
 # ----
 
+[tool.ruff]
+line-length = 88  # oder was du brauchst
+
 [tool.ruff.lint]
 select = [
     # pycodestyle
@@ -62,6 +65,7 @@ select = [
     # pep8-naming
     "N",
 ]
+extend-select = ["E501"]
 
 
 # Mypy
@@ -79,7 +83,12 @@ warn_no_return = true
 # Don't require test functions to include types
 module = "tests.*"
 allow_untyped_defs = true
-disable_error_code = "attr-defined"
+disable_error_code = ["attr-defined", "import-untyped"]
+
+[[tool.mypy.overrides]]
+module = "src.*"
+disable_error_code = ["import-untyped"]
+
 
 [dependency-groups]
 dev = [
@@ -92,9 +101,11 @@ dev = [
     "ipykernel>=6.29.5",
     "ipywidgets>=8.1.5",
     "matplotlib>=3.9.4",
+    "mypy>=1.15.0",
     "networkx>=3.0",
     "numpy==1.26.0",
     "pandas>=2.2.3",
+    "pip>=25.0.1",
     "pydrmetrics>=0.0.7",
     "pytest>=8.3.4",
     "scikit-image>=0.24.0",

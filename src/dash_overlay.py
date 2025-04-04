@@ -1,9 +1,10 @@
 from dataclasses import dataclass
+from typing import Any
 
-import plotly.express as px
-from dash import Dash, Input, Output, callback, dcc, html
+import plotly.express as px  # type: ignore
+from dash import Dash, Input, Output, callback, dcc, html  # type: ignore
 
-from embedding_obj import EmbeddingObj
+from embedding_obj import EmbeddingObj  # type: ignore
 
 
 @dataclass
@@ -13,7 +14,7 @@ class DashOverlay:
     iterations: list[int]
     color_range: list[float]
 
-    def __init__(self, data):
+    def __init__(self, data: list[EmbeddingObj]):
         self.data = data
 
         self.iterations = []
@@ -23,7 +24,7 @@ class DashOverlay:
         self.color_range = self.compute_color_scale()
         self.instanciate_dash()
 
-    def instanciate_dash(self):
+    def instanciate_dash(self) -> None:
         self.app = Dash(__name__, external_stylesheets=self.external_stylesheets)
         self.app.layout = html.Div(
             [
@@ -54,8 +55,8 @@ class DashOverlay:
         @callback(
             Output("crossfilter-indicator-scatter", "figure"),
             Input("crossfilter-iteration--slider", "value"),
-        )
-        def update_graph(iteration_value):
+        )  # type: ignore
+        def update_graph(iteration_value: int) -> px.scatter:
             fig = px.scatter(
                 x=self.data[self.iterations.index(iteration_value)].embedding[:, 0],
                 y=self.data[self.iterations.index(iteration_value)].embedding[:, 1],
@@ -71,12 +72,12 @@ class DashOverlay:
 
             return fig
 
-    def compute_color_scale(self):
+    def compute_color_scale(self) -> list[float]:
         scores = []
         for i in range(len(self.data)):
             scores.extend(self.data[i].m_jaccard)
 
         return [min(scores), max(scores)]
 
-    def run(self, **kwargs):
+    def run(self, **kwargs:  dict[str, Any]) -> None:
         self.app.run(**kwargs)
