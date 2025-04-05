@@ -111,3 +111,40 @@ def display_graphs(
                         cbar.set_ticklabels(cbar_labels)
             else:
                 fig.delaxes(axs[i])
+
+
+def plot_shepard_diagram(
+    x_data: ArrayLike,
+    y_data: ArrayLike,
+    feature_name: str,
+    show_stress: bool = True,
+) -> None:
+    df_data = pd.DataFrame(
+        {
+            "Transformed Similarity": x_data,
+            "Original Similarity": y_data,
+        }
+    )
+
+    # Plot the Shepard diagram using Seaborn
+    sb.jointplot(
+        x="Transformed Similarity",
+        y="Original Similarity",
+        data=df_data,
+        kind="hist",
+    )
+    sb.lineplot(x=[0, 1], y=[0, 1], color="red", linestyle="--")
+
+    if show_stress:
+        shepard_x, shepard_y = compute_shepard_curve(
+            df_data["Original Similarity"], df_data["Transformed Similarity"]
+        )
+        sb.lineplot(x=shepard_x, y=shepard_y, color="blue")
+
+        stress = compute_kruskal_stress(
+            df_data["Original Similarity"], df_data["Transformed Similarity"]
+        )
+        print(f"Kruskal Stress: {stress}")
+
+    plt.suptitle(f"Shepard Diagram: Similarity for '{feature_name}'", y=1.02)
+    plt.show()

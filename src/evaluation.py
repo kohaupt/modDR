@@ -1,13 +1,11 @@
 import time
 from typing import Optional
 
-import matplotlib.pyplot as plt
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
-import seaborn as sb
 from numpy.typing import ArrayLike
-from pyDRMetrics.pyDRMetrics import DRMetrics  # type: ignore
+from scipy.stats import spearmanr
 from sklearn.isotonic import IsotonicRegression  # type: ignore
 from sklearn.metrics import euclidean_distances, pairwise_distances  # type: ignore
 from sklearn.neighbors import KDTree  # type: ignore
@@ -43,43 +41,6 @@ def compute_kruskal_stress(
 def compute_distance_matrix(input_array: ArrayLike) -> npt.NDArray[np.float32]:
     distances = euclidean_distances(input_array, input_array)
     return distances[np.triu_indices(distances.shape[0], k=1)]
-
-
-def plot_shepard_diagram(
-    x_data: ArrayLike,
-    y_data: ArrayLike,
-    feature_name: str,
-    show_stress: bool = True,
-) -> None:
-    df_data = pd.DataFrame(
-        {
-            "Transformed Similarity": x_data,
-            "Original Similarity": y_data,
-        }
-    )
-
-    # Plot the Shepard diagram using Seaborn
-    sb.jointplot(
-        x="Transformed Similarity",
-        y="Original Similarity",
-        data=df_data,
-        kind="hist",
-    )
-    sb.lineplot(x=[0, 1], y=[0, 1], color="red", linestyle="--")
-
-    if show_stress:
-        shepard_x, shepard_y = compute_shepard_curve(
-            df_data["Original Similarity"], df_data["Transformed Similarity"]
-        )
-        sb.lineplot(x=shepard_x, y=shepard_y, color="blue")
-
-        stress = compute_kruskal_stress(
-            df_data["Original Similarity"], df_data["Transformed Similarity"]
-        )
-        print(f"Kruskal Stress: {stress}")
-
-    plt.suptitle(f"Shepard Diagram: Similarity for '{feature_name}'", y=1.02)
-    plt.show()
 
 
 # -----------------------------------------------------------------------------
@@ -158,9 +119,6 @@ def compute_jaccard_distances(
     return accuracy
 
 
-# -----------------------------------------------------------------------------
-
-
 def _nhood_search_unlimited(data: ArrayLike) -> npt.NDArray[np.float32]:
     dmat = pairwise_distances(data)
     indices_sorted = np.argsort(dmat)
@@ -175,6 +133,131 @@ def _nhood_search_unlimited(data: ArrayLike) -> npt.NDArray[np.float32]:
         )
 
     return indices_sorted_cleaned
+
+
+# -----------------------------------------------------------------------------
+
+# -----------------------------------------------------------------------------
+# Based on pyDRMetrics (https://github.com/zhangys11/pyDRMetrics)
+# Reference
+# .. [1] Zhang, Y., Shang, Q., & Zhang, G. (2021). pyDRMetrics-A Python toolkit for dimensionality reduction quality assessment. Heliyon, 7(2).
+
+
+def coranking_matrix(R1: npt.NDArray[int], R2: npt.NDArray[int]) -> npt.NDArray[int]:
+    assert R1.shape == R2.shape
+    Q = np.zeros(R1.shape)
+    m = len(Q)
+
+    m = max(R1.max(), R2.max()) + 1
+
+    Q, _, _ = np.histogram2d(
+        R1.ravel(), R2.ravel(), bins=(m, m), range=[[0, m], [0, m]]
+    )
+
+    return Q
+
+
+def metric_spearman(
+    highdim_data: pd.DataFrame, lowdim_data: pd.DataFrame, target_features: list[str]
+) -> float:
+    highdim_data_target = highdim_data[target_features]
+    highdim_dists = pairwise_distances(highdim_data_target.values)
+    lowdim_dists = pairwise_distances(lowdim_data.values)
+
+    return spearmanr(highdim_dists.flatten(), lowdim_dists.flatten())[0]
+
+
+def compute_global_metrics(
+    highdim_df: pd.DataFrame,
+    embeddings: list[EmbeddingObj],
+    target_features: list[str],
+) -> list[EmbeddingObj]:
+    # compute pairwise distances + ranking matrix for highdim data
+    D_highdim = pd.DataFrame(pairwise_distances(highdim_df.values)).values
+    D_highdim_rank = [np.argsort(np.argsort(row)) for row in D_highdim]
+
+    for emb in embeddings:
+        print("------------------------------------------------------------")
+        print("Computing metrics for embedding with marker: ", emb.marker)
+        start_time = time.time()
+
+        # compute pairwise distances + ranking matrix for lowdim data
+        lowdim_df = pd.DataFrame(emb.embedding, index=None)
+        D_lowdim = pd.DataFrame(pairwise_distances(lowdim_df.values)).values
+        D_lowdim_rank = [np.argsort(np.argsort(row)) for row in D_lowdim]
+
+        cr_matrix = coranking_matrix(
+            np.asarray(D_highdim_rank, dtype=int), np.asarray(D_lowdim_rank, dtype=int)
+        )
+
+        Q = cr_matrix[1:, 1:]
+        m = len(Q)
+
+        T = np.zeros(m - 1)  # trustworthiness
+        C = np.zeros(m - 1)  # continuity
+        QNN = np.zeros(m)  # Co-k-nearest neighbor size
+        LCMC = np.zeros(m)  # Local Continuity Meta Criterion
+
+        for k in range(m - 1):
+            Qs = Q[k:, :k]
+            W = np.arange(Qs.shape[0]).reshape(
+                -1, 1
+            )  # a column vector of weights. weight = rank error = actual_rank - k
+            T[k] = (
+                1 - np.sum(Qs * W) / (k + 1) / m / (m - 1 - k)
+            )  # 1 - normalized hard-k-intrusions. lower-left region. weighted by rank error (rank - k)
+            Qs = Q[:k, k:]
+            W = np.arange(Qs.shape[1]).reshape(
+                1, -1
+            )  # a row vector of weights. weight = rank error = actual_rank - k
+            C[k] = 1 - np.sum(Qs * W) / (k + 1) / m / (
+                m - 1 - k
+            )  # 1 - normalized hard-k-extrusions. upper-right region
+
+        Q_cumsum = np.cumsum(np.cumsum(Q, axis=0), axis=1)
+        diag_idxs = np.arange(m)
+        QNN = Q_cumsum[diag_idxs, diag_idxs] / ((diag_idxs + 1) * m)
+        LCMC = QNN - (diag_idxs + 1) / (m - 1)
+
+        kmax = np.argmax(LCMC)
+        Qlocal = np.sum(QNN[: kmax + 1]) / (kmax + 1)
+        # Qglobal = np.sum(QNN[kmax:-1])/(m - kmax -1) # skip the last. The last is (m-1)-nearest neighbor, including all samples.
+        # AUC = np.mean(QNN)
+
+        emb.coranking_matrix = cr_matrix
+        emb.m_trustworthiness = np.mean(T)
+        emb.m_continuity = np.mean(C)
+        emb.m_q_local = Qlocal
+        emb.m_kruskal_stress = compute_kruskal_stress(D_highdim, D_lowdim)
+        emb.m_shepard_spearman = metric_spearman(highdim_df, lowdim_df, target_features)
+
+        emb.m_total_score = metric_total_score(emb)
+
+        end_time = time.time()
+        print("Computation time: ", end_time - start_time)
+        print("------------------------------------------------------------")
+    return embeddings
+
+
+# -----------------------------------------------------------------------------
+
+
+def compute_pairwise_metrics(
+    highdim_data: npt.NDArray[np.float32], embeddings: list[EmbeddingObj]
+) -> list[EmbeddingObj]:
+    for emb in embeddings:
+        print("------------------------------------------------------------")
+        print("Computing metrics for embedding with marker: ", emb.marker)
+        start_time = time.time()
+
+        emb.m_jaccard = compute_jaccard_distances(
+            highdim_data, emb.embedding, nhood_size=7
+        )
+        end_time = time.time()
+        print("Computation time: ", end_time - start_time)
+        print("------------------------------------------------------------")
+
+    return embeddings
 
 
 def compute_sequence_diff(
@@ -239,105 +322,7 @@ def compute_sequence_change(
     return [x if x > 0 else 0 for x in sequence_diff_change]
 
 
-def pydrmetrics_plot_coranking_matrix(
-    highdim_data: ArrayLike, lowdim_data: ArrayLike
-) -> None:
-    drm = DRMetrics(highdim_data, lowdim_data)
-    drm.plot_coranking_matrix()
-
-
-def metric_q_local(
-    reference_points: ArrayLike,
-    embedding_points: ArrayLike,
-    metrics_obj: Optional[type[DRMetrics]] = None,
-) -> tuple[float, type[DRMetrics]]:
-    if metrics_obj is None:
-        metrics_obj = DRMetrics(reference_points, embedding_points)
-
-    return metrics_obj.Qlocal, metrics_obj
-
-
-def metric_trustworthiness(
-    reference_points: ArrayLike,
-    embedding_points: ArrayLike,
-    metrics_obj: Optional[type[DRMetrics]] = None,
-) -> tuple[float, type[DRMetrics]]:
-    if metrics_obj is None:
-        metrics_obj = DRMetrics(reference_points, embedding_points)
-
-    return metrics_obj.AUC_T, metrics_obj
-
-
-def metric_continuity(
-    reference_points: ArrayLike,
-    embedding_points: ArrayLike,
-    metrics_obj: Optional[type[DRMetrics]] = None,
-) -> tuple[float, type[DRMetrics]]:
-    if metrics_obj is None:
-        metrics_obj = DRMetrics(reference_points, embedding_points)
-
-    return metrics_obj.AUC_T, metrics_obj
-
-
-# TODO: Implement metric_norm_stress
-def metric_norm_stress(
-    reference_points: ArrayLike,
-    embedding_points: ArrayLike,
-    metrics_obj: Optional[type[DRMetrics]] = None,
-) -> tuple[float, type[DRMetrics]]:
-    if metrics_obj is None:
-        metrics_obj = DRMetrics(reference_points, embedding_points)
-
-    return 0, metrics_obj
-
-
-def metric_spearman(
-    reference_points: ArrayLike,
-    embedding_points: ArrayLike,
-    metrics_obj: Optional[type[DRMetrics]] = None,
-) -> tuple[float, type[DRMetrics]]:
-    if metrics_obj is None:
-        metrics_obj = DRMetrics(reference_points, embedding_points)
-
-    return metrics_obj.Vrs, metrics_obj
-
-
 def metric_total_score(
-    reference_points: ArrayLike,
-    embedding_points: ArrayLike,
-    weights: Optional[ArrayLike] = None,
-    metrics_obj: Optional[type[DRMetrics]] = None,
-) -> float:
-    n_metrics = 5
-
-    if weights is None:
-        weights = [1, 1, 1, 1, 1]
-
-    assert len(weights) == n_metrics, (
-        "The number of weights must match the number of metrics."
-    )
-
-    m_ql, metrics_obj_computed = metric_q_local(
-        reference_points, embedding_points, metrics_obj
-    )
-
-    if metrics_obj is None:
-        metrics_obj = metrics_obj_computed
-
-    m_t = metric_trustworthiness(reference_points, embedding_points, metrics_obj)[0]
-    m_c = metric_continuity(reference_points, embedding_points, metrics_obj)
-    m_ns = 1 - metric_norm_stress(reference_points, embedding_points, metrics_obj)[0]
-    m_s = metric_spearman(reference_points, embedding_points, metrics_obj)[0]
-
-    metrics_list = [m_ql, m_t, m_c, m_ns, m_s]
-    m_total = 0
-    for i in range(n_metrics):
-        m_total += weights[i] * metrics_list[i]
-
-    return m_total / n_metrics
-
-
-def metric_total_score_emb(
     embedding_obj: type[EmbeddingObj],
     weights: Optional[ArrayLike] = None,
 ) -> float:
@@ -353,10 +338,10 @@ def metric_total_score_emb(
     m_ql = embedding_obj.m_q_local
     m_t = embedding_obj.m_trustworthiness
     m_c = embedding_obj.m_continuity
-    m_ns = 1 - embedding_obj.m_normalized_stress
-    m_s = embedding_obj.m_spearman
+    m_ks = 1 - embedding_obj.m_kruskal_stress
+    m_s = embedding_obj.m_shepard_spearman
 
-    metrics_list = [m_ql, m_t, m_c, m_ns, m_s]
+    metrics_list = [m_ql, m_t, m_c, m_ks, m_s]
     m_total = 0
     for i in range(n_metrics):
         m_total += weights[i] * metrics_list[i]
@@ -364,52 +349,38 @@ def metric_total_score_emb(
     return m_total / n_metrics
 
 
-def add_local_metrics(
-    highdim_data: npt.NDArray[np.float32], embeddings: list[EmbeddingObj]
-) -> list[EmbeddingObj]:
-    for emb in embeddings:
-        print("------------------------------------------------------------")
-        print("Computing metrics for embedding with marker: ", emb.marker)
-        start_time = time.time()
-
-        emb.m_jaccard = compute_jaccard_distances(
-            highdim_data, emb.embedding, nhood_size=7
-        )
-        end_time = time.time()
-        print("Computation time: ", end_time - start_time)
-        print("------------------------------------------------------------")
-
-    return embeddings
-
-
-def add_global_metrics(
-    highdim_data: npt.NDArray[np.float32], embeddings: list[EmbeddingObj]
-) -> list[EmbeddingObj]:
-    for emb in embeddings:
-        print("------------------------------------------------------------")
-        print("Computing metrics for embedding with marker: ", emb.marker)
-        start_time = time.time()
-
-        emb.m_q_local, metrics_obj = metric_q_local(highdim_data, emb.embedding)
-        emb.m_trustworthiness, _ = metric_trustworthiness(
-            highdim_data, emb.embedding, metrics_obj=metrics_obj
-        )
-        emb.m_continuity, _ = metric_continuity(
-            highdim_data, emb.embedding, metrics_obj=metrics_obj
-        )
-        emb.m_spearman, _ = metric_spearman(
-            highdim_data, emb.embedding, metrics_obj=metrics_obj
-        )
-        emb.m_normalized_stress, _ = metric_norm_stress(
-            highdim_data, emb.embedding, metrics_obj=metrics_obj
-        )
-
-        emb.m_total_score = metric_total_score_emb(emb)
-
-        end_time = time.time()
-        print("Computation time: ", end_time - start_time)
-        print("------------------------------------------------------------")
-    return embeddings
+# def metric_total_score(
+#     reference_points: ArrayLike,
+#     embedding_points: ArrayLike,
+#     weights: Optional[ArrayLike] = None,
+# ) -> float:
+#     n_metrics = 5
+#
+#     if weights is None:
+#         weights = [1, 1, 1, 1, 1]
+#
+#     assert len(weights) == n_metrics, (
+#         "The number of weights must match the number of metrics."
+#     )
+#
+#     m_ql, metrics_obj_computed = metric_q_local(
+#         reference_points, embedding_points, metrics_obj
+#     )
+#
+#     if metrics_obj is None:
+#         metrics_obj = metrics_obj_computed
+#
+#     m_t = metric_trustworthiness(reference_points, embedding_points, metrics_obj)[0]
+#     m_c = metric_continuity(reference_points, embedding_points, metrics_obj)
+#     m_ns = 1 - metric_norm_stress(reference_points, embedding_points, metrics_obj)[0]
+#     m_s = metric_spearman(reference_points, embedding_points, metrics_obj)[0]
+#
+#     metrics_list = [m_ql, m_t, m_c, m_ns, m_s]
+#     m_total = 0
+#     for i in range(n_metrics):
+#         m_total += weights[i] * metrics_list[i]
+#
+#     return m_total / n_metrics
 
 
 def metrics_report(embeddings: list[EmbeddingObj]) -> pd.DataFrame:
@@ -421,8 +392,8 @@ def metrics_report(embeddings: list[EmbeddingObj]) -> pd.DataFrame:
             "m_q_local",
             "m_trustworthiness",
             "m_continuity",
-            "m_spearman",
-            "m_normalized_stress",
+            "m_shepard_spearman",
+            "m_kruskal_stress",
         ]
     )
 
@@ -433,7 +404,7 @@ def metrics_report(embeddings: list[EmbeddingObj]) -> pd.DataFrame:
                      emb.m_q_local,
                      emb.m_trustworthiness,
                      emb.m_continuity,
-                     emb.m_spearman,
-                     emb.m_normalized_stress]
+                     emb.m_shepard_spearman,
+                     emb.m_kruskal_stress]
 
     return df

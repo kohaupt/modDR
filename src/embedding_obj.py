@@ -15,13 +15,14 @@ class EmbeddingObj:
     title: Optional[str]
     marker: Optional[float]
 
+    coranking_matrix: Optional[npt.NDArray[int]] = None
     m_jaccard: Optional[npt.NDArray[np.float32]] = None
-    m_q_local: Optional[npt.NDArray[np.float32]] = None
-    m_trustworthiness: Optional[npt.NDArray[np.float32]] = None
-    m_continuity: Optional[npt.NDArray[np.float32]] = None
-    m_spearman: Optional[npt.NDArray[np.float32]] = None
-    m_normalized_stress: Optional[float] = None
-    m_total_score: Optional[float] = None
+    m_q_local: float = 0.0
+    m_trustworthiness: float = 0.0
+    m_continuity: float = 0.0
+    m_shepard_spearman: float = 0.0
+    m_kruskal_stress: float = 0.0
+    m_total_score: float = 0.0
 
     def __init__(self,
                  graph: nx.Graph,
@@ -64,11 +65,16 @@ class EmbeddingObj:
         else:
             output_str += "Jaccard-Scores: not computed\n"
 
+        if self.coranking_matrix is not None:
+            output_str += f"Co-Ranking Matrix: {self.coranking_matrix.shape[0]} x {self.coranking_matrix.shape[1]} (entries)\n"
+        else:
+            output_str += "Co-Ranking Matrix: not computed\n"
+
         output_str += f"Q local: {self.m_q_local if self.m_q_local is not None else 'not computed'}\n"
-        output_str += f"Trustworthiness: {self.m_trustworthiness if self.m_trustworthiness is not None else 'not computed'}\n"
-        output_str += f"Continuity: {self.m_continuity if self.m_continuity is not None else 'not computed'}\n"
-        output_str += f"Spearman Score: {self.m_spearman if self.m_spearman is not None else 'not computed'}\n"
-        output_str += f"Normalized Stress: {self.m_normalized_stress if self.m_normalized_stress is not None else 'not computed'}\n"
+        output_str += f"Trustworthiness (AUC): {self.m_trustworthiness if self.m_trustworthiness is not None else 'not computed'}\n"
+        output_str += f"Continuity (AUC): {self.m_continuity if self.m_continuity is not None else 'not computed'}\n"
+        output_str += f"Spearman Score: {self.m_shepard_spearman if self.m_shepard_spearman is not None else 'not computed'}\n"
+        output_str += f"Normalized Stress: {self.m_kruskal_stress if self.m_kruskal_stress is not None else 'not computed'}\n"
 
         output_str += "---------------------------------------\n\n"
 
