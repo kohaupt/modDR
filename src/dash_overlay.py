@@ -19,7 +19,7 @@ class DashOverlay:
 
         self.iterations = []
         for d in data:
-            self.iterations.append(d.marker)
+            self.iterations.append(d.id)
 
         self.color_range = self.compute_color_scale()
         self.instanciate_dash()
@@ -79,5 +79,5 @@ class DashOverlay:
 
         return [min(scores), max(scores)]
 
-    def run(self, **kwargs:  dict[str, Any]) -> None:
+    def run(self, **kwargs: dict[str, Any]) -> None:
         self.app.run(**kwargs)

@@ -6,26 +6,10 @@ import numpy.typing as npt
 import pandas as pd
 from numpy.typing import ArrayLike
 from scipy.stats import spearmanr
-from sklearn.isotonic import IsotonicRegression  # type: ignore
 from sklearn.metrics import euclidean_distances, pairwise_distances  # type: ignore
 from sklearn.neighbors import KDTree  # type: ignore
 
 from embedding_obj import EmbeddingObj  # type: ignore
-
-
-def compute_shepard_curve(
-    original_similarities: ArrayLike, transformed_similarities: ArrayLike
-) -> tuple[list[float], npt.NDArray[np.float32]]:
-    # Sort values based on transformed similarities
-    sorted_indices = np.argsort(transformed_similarities)
-    sorted_transformed = transformed_similarities[sorted_indices]
-    sorted_original = original_similarities[sorted_indices]
-
-    # Apply isotonic regression to enforce monotonicity
-    iso_reg = IsotonicRegression(increasing=True)
-    shepard_curve = iso_reg.fit_transform(sorted_transformed, sorted_original)
-
-    return sorted_transformed.tolist(), shepard_curve
 
 
 def compute_kruskal_stress(
@@ -178,7 +162,7 @@ def compute_global_metrics(
 
     for emb in embeddings:
         print("------------------------------------------------------------")
-        print("Computing metrics for embedding with marker: ", emb.marker)
+        print("Computing global metrics for embedding with marker: ", emb.id)
         start_time = time.time()
 
         # compute pairwise distances + ranking matrix for lowdim data
@@ -247,7 +231,7 @@ def compute_pairwise_metrics(
 ) -> list[EmbeddingObj]:
     for emb in embeddings:
         print("------------------------------------------------------------")
-        print("Computing metrics for embedding with marker: ", emb.marker)
+        print("Computing pairwise metrics for embedding with marker: ", emb.id)
         start_time = time.time()
 
         emb.m_jaccard = compute_jaccard_distances(
@@ -398,7 +382,7 @@ def metrics_report(embeddings: list[EmbeddingObj]) -> pd.DataFrame:
     )
 
     for i, emb in enumerate(embeddings):
-        df.loc[i] = [emb.marker,
+        df.loc[i] = [emb.id,
                      emb.m_total_score,
                      emb.m_jaccard.size,
                      emb.m_q_local,

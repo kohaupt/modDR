@@ -53,14 +53,21 @@ def compute_iterations(
     embeddings = []
 
     for iteration in iterations:
-        emb = EmbeddingObj(graph, initial_pos, np.array([]))
+        # TODO: Add switch case for different methods when implemented
+        # if method == "force-directed":
+        #     iteration_embedding = compute_force_directed(graph, iteration, initial_pos)
+        print("------------------------------------------------------------")
+        print("Computing modified embedding for iteration: ", iteration)
 
-        if method == "force-directed":
-            emb.embedding = compute_force_directed(graph, iteration, initial_pos)
+        iteration_embedding = compute_force_directed(graph, iteration, initial_pos)
+        emb = EmbeddingObj(graph, iteration_embedding, np.array([]))
 
-        emb.marker = iteration
+        emb.id = iteration
         emb.title = "Position after " + str(iteration) + " iterations"
         embeddings.append(emb)
+
+        print("Computation finished")
+        print("------------------------------------------------------------")
 
     return embeddings
 
@@ -103,7 +110,7 @@ def compute_knn(
 def fit(
     data: pd.DataFrame,
     initial_pos: npt.NDArray[np.float32],
-    features: list[str],
+    sim_features: list[str],
     method: str = "force-directed",
     n_neighbors: int = 3,
     iterations: Optional[list[int]] = None,
@@ -111,7 +118,7 @@ def fit(
     # TODO: Add assertion for falsy parameters
     if iterations is None:
         iterations = [1, 3, 5, 10]
-    graph, edge_weights = compute_knn(data, features, n_neighbors)
+    graph, edge_weights = compute_knn(data, sim_features, n_neighbors)
 
     embeddings = compute_iterations(graph, initial_pos, iterations, method=method)
     return embeddings

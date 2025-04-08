@@ -8,12 +8,11 @@ import numpy.typing as npt
 
 @dataclass
 class EmbeddingObj:
-
     sim_graph: nx.Graph
     embedding: npt.NDArray[np.float32]
     edge_weights: npt.NDArray[np.float32]
     title: Optional[str]
-    marker: Optional[float]
+    id: Optional[float]
 
     coranking_matrix: Optional[npt.NDArray[int]] = None
     m_jaccard: Optional[npt.NDArray[np.float32]] = None
@@ -29,7 +28,7 @@ class EmbeddingObj:
                  embedding: npt.NDArray[np.float32],
                  edge_weights: npt.NDArray[np.float32],
                  title: Optional[str] = None,
-                 marker: Optional[float] = None) -> None:
+                 id: Optional[float] = None) -> None:
         self.sim_graph = graph
         self.embedding = embedding
         if len(edge_weights) == 0:
@@ -38,11 +37,11 @@ class EmbeddingObj:
             self.edge_weights = edge_weights
 
         self.title = title
-        self.marker = marker
+        self.id = id
 
     def __str__(self) -> str:
         return ("---------------------------------------\n"
-                f"Embedding object (Marker: {self.marker})\n"
+                f"Embedding object (ID: {self.id})\n"
                 f"Title: '{self.title}'\n"
                 f"Graph: {self.sim_graph}\n"
                 f"Embedding shape: {self.embedding.shape}\n"
@@ -56,7 +55,7 @@ class EmbeddingObj:
 
     def metrics_info(self) -> None:
         output_str = "---------------------------------------\n"
-        output_str += f"Embedding object (Marker: {self.marker})\n"
+        output_str += f"Embedding object (ID: {self.id})\n"
 
         output_str += f"Total score: {self.m_total_score if self.m_total_score is not None else 'not computed'}\n"
 

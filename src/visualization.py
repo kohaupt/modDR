@@ -3,34 +3,16 @@ from typing import Any, Optional
 
 import matplotlib.pyplot as plt
 import networkx as nx
+import numpy as np
 import numpy.typing as npt
+import pandas as pd
+import seaborn as sb
+from numpy.typing import ArrayLike
+from scipy.spatial.distance import pdist
+from sklearn.isotonic import IsotonicRegression
+from sklearn.preprocessing import MinMaxScaler
 
 from embedding_obj import EmbeddingObj  # type: ignore
-
-
-def display_reduction_results(
-    results: list[EmbeddingObj],
-    figsize_columns: int,
-    figsize: tuple[int, int] = (15, 15),
-) -> None:
-    figsize_rows = math.ceil(len(results) / figsize_columns)
-    fig = plt.subplots(figsize_rows, figsize_columns, figsize=figsize)
-    # fig.tight_layout(pad=3)
-
-    for i in range(len(results)):
-        plt.subplot(figsize_rows, figsize_columns, i + 1).set_title(results[i][0])
-
-        if len(results[i][1][0]) <= 2:
-            plt.subplot(figsize_rows, figsize_columns, i + 1).scatter(
-                results[i][1][:, 0], results[i][1][:, 1], alpha=0.4
-            )
-        else:
-            plt.subplot(figsize_rows, figsize_columns, i + 1).scatter(
-                results[i][1][:, 0],
-                results[i][1][:, 1],
-                c=results[i][1][:, 2],
-                alpha=0.4,
-            )
 
 
 def display_graphs(
@@ -113,38 +95,70 @@ def display_graphs(
                 fig.delaxes(axs[i])
 
 
+def compute_shepard_curve(
+    original_similarities: ArrayLike, transformed_similarities: ArrayLike
+) -> tuple[list[float], npt.NDArray[np.float32]]:
+    # Sort values based on transformed similarities
+    sorted_indices = np.argsort(transformed_similarities)
+    sorted_transformed = transformed_similarities[sorted_indices]
+    sorted_original = original_similarities[sorted_indices]
+
+    # Apply isotonic regression to enforce monotonicity
+    iso_reg = IsotonicRegression(increasing=True)
+    shepard_curve = iso_reg.fit_transform(sorted_transformed, sorted_original)
+
+    return sorted_transformed.tolist(), shepard_curve
+
+
 def plot_shepard_diagram(
-    x_data: ArrayLike,
-    y_data: ArrayLike,
-    feature_name: str,
+    highdim_df: pd.DataFrame,
+    embedding: EmbeddingObj,
+    target_features: list[str],
     show_stress: bool = True,
 ) -> None:
-    df_data = pd.DataFrame(
+    highdim_df_filtered = highdim_df[target_features].values.reshape(-1, 1)
+
+    sim_highdim = pdist(highdim_df_filtered)
+    sim_lowdim = pdist(embedding.embedding)
+
+    scaler = MinMaxScaler()
+    sim_highdim = scaler.fit_transform(sim_highdim.reshape(-1, 1)).flatten()
+    sim_lowdim = scaler.fit_transform(sim_lowdim.reshape(-1, 1)).flatten()
+
+    sim_data_df = pd.DataFrame(
         {
-            "Transformed Similarity": x_data,
-            "Original Similarity": y_data,
+            "Transformed Similarity": sim_lowdim,
+            "Original Similarity": sim_highdim,
         }
     )
 
     # Plot the Shepard diagram using Seaborn
-    sb.jointplot(
+    fig = sb.jointplot(
         x="Transformed Similarity",
         y="Original Similarity",
-        data=df_data,
+        data=sim_data_df,
         kind="hist",
     )
-    sb.lineplot(x=[0, 1], y=[0, 1], color="red", linestyle="--")
+
+    ax = fig.ax_joint
+    # sb.lineplot(x=[0, 1], y=[0, 1], color="red", linestyle="--")
+    ax.plot([0, 1], [0, 1], color="red", linestyle="--")
 
     if show_stress:
         shepard_x, shepard_y = compute_shepard_curve(
-            df_data["Original Similarity"], df_data["Transformed Similarity"]
+            sim_data_df["Original Similarity"], sim_data_df["Transformed Similarity"]
         )
-        sb.lineplot(x=shepard_x, y=shepard_y, color="blue")
+        # sb.lineplot(x=shepard_x, y=shepard_y, color="blue")
+        ax.plot(shepard_x, shepard_y, color="blue")
 
-        stress = compute_kruskal_stress(
-            df_data["Original Similarity"], df_data["Transformed Similarity"]
-        )
-        print(f"Kruskal Stress: {stress}")
-
-    plt.suptitle(f"Shepard Diagram: Similarity for '{feature_name}'", y=1.02)
+    plt.suptitle(f"Shepard Diagram: Similarity for '{str(target_features)}'", y=1.02)
     plt.show()
+
+
+def plot_metrics_report(data: pd.DataFrame) -> None:
+    df_melted = data.drop("metric_jaccard (size)", axis=1).melt(
+        id_vars="marker", var_name="Feature", value_name="Value"
+    )
+    sb.set_style("whitegrid", {"axes.grid": False})
+    sb.lineplot(data=df_melted, x="marker", y="Value", hue="Feature", palette="muted",
+                marker="o")
