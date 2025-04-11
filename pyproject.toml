@@ -4,7 +4,7 @@ requires-python = ">=3.9"
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "ma"
+name = "modDR"
 version = "0.1.0"
 description = "Python Boilerplate contains all the boilerplate you need to create a Python package."
 readme = "README.rst"
@@ -32,9 +32,9 @@ dev = [
 
 [project.urls]
 
-bugs = "https://github.com/kohaupt/ma/issues"
-changelog = "https://github.com/kohaupt/ma/blob/master/changelog.md"
-homepage = "https://github.com/kohaupt/ma"
+bugs = "https://github.com/kohaupt/modDR/issues"
+changelog = "https://github.com/kohaupt/modDR/blob/master/changelog.md"
+homepage = "https://github.com/kohaupt/modDR"
 
 [tool.setuptools]
 package-dir = { "" = "src" }

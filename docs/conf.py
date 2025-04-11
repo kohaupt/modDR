@@ -47,7 +47,7 @@ source_suffix = '.rst'
 master_doc = 'index'
 
 # General information about the project.
-project = 'master_thesis'
+project = 'modDR'
 copyright = "2025, Konstantin Haupt"
 author = "Konstantin Haupt"
 
@@ -129,7 +129,7 @@ latex_elements = {
 # [howto, manual, or own class]).
 latex_documents = [
     (master_doc, 'ma.tex',
-     'master_thesis Documentation',
+     'modDR Documentation',
      'Konstantin Haupt', 'manual'),
 ]
 
@@ -140,7 +140,7 @@ latex_documents = [
 # (source start file, name, description, authors, manual section).
 man_pages = [
     (master_doc, 'ma',
-     'master_thesis Documentation',
+     'modDR Documentation',
      [author], 1)
 ]
 
@@ -152,7 +152,7 @@ man_pages = [
 #  dir menu entry, description, category)
 texinfo_documents = [
     (master_doc, 'ma',
-     'master_thesis Documentation',
+     'modDR Documentation',
      author,
      'ma',
      'One line description of project.',

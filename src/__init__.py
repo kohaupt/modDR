@@ -1,4 +1,4 @@
-"""Top-level package for master_thesis."""
+"""Top-level package for modDR."""
 
 __author__ = """Konstantin Haupt"""
 __email__ = 'konstantin.haupt@study.hs-duesseldorf.de'
