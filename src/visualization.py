@@ -1,5 +1,5 @@
 import math
-from typing import Any, Optional
+from typing import Optional
 
 import matplotlib.pyplot as plt
 import networkx as nx
@@ -17,7 +17,6 @@ from embedding_obj import EmbeddingObj  # type: ignore
 
 def display_graphs(
     results: list[EmbeddingObj],
-    labels: npt.NDArray[Any],
     figsize_columns: int = 2,
     figsize: tuple[int, int] = (15, 15),
     cmap: plt.cm = plt.cm.Accent,
@@ -45,12 +44,14 @@ def display_graphs(
             results[0].sim_graph,
             pos=results[0].embedding,
             node_size=30,
-            node_color=labels if len(labels.shape) == 1 else labels[0],
+            node_color=np.array(list(results[0].labels.values()))
+            if results[0].labels is not None
+            else "blue",
             edge_color=results[0].edge_weights if show_edges else "white",
             edge_vmin=0,
             edge_vmax=1,
             width=0.4,
-            alpha=0.6,
+            alpha=1.0,
             edge_cmap=edge_cmap,
             cmap=cmap,
         )
@@ -74,7 +75,9 @@ def display_graphs(
                     ax=axs[i],
                     pos=results[i].embedding,
                     node_size=30,
-                    node_color=labels if len(labels.shape) == 1 else labels[i],
+                    node_color=np.array(list(results[i].labels.values()))
+                    if results[i].labels is not None
+                    else "blue",
                     edge_color=results[i].edge_weights if show_edges else "white",
                     edge_vmin=0,
                     edge_vmax=1,

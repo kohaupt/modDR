@@ -19,7 +19,7 @@ class DashOverlay:
 
         self.iterations = []
         for d in data:
-            self.iterations.append(d.id)
+            self.iterations.append(d.obj_id)
 
         self.color_range = self.compute_color_scale()
         self.instanciate_dash()

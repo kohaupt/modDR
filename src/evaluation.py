@@ -162,7 +162,7 @@ def compute_global_metrics(
 
     for emb in embeddings:
         print("------------------------------------------------------------")
-        print("Computing global metrics for embedding with marker: ", emb.id)
+        print("Computing global metrics for embedding with marker: ", emb.obj_id)
         start_time = time.time()
 
         # compute pairwise distances + ranking matrix for lowdim data
@@ -231,7 +231,7 @@ def compute_pairwise_metrics(
 ) -> list[EmbeddingObj]:
     for emb in embeddings:
         print("------------------------------------------------------------")
-        print("Computing pairwise metrics for embedding with marker: ", emb.id)
+        print("Computing pairwise metrics for embedding with marker: ", emb.obj_id)
         start_time = time.time()
 
         emb.m_jaccard = compute_jaccard_distances(
@@ -382,7 +382,7 @@ def metrics_report(embeddings: list[EmbeddingObj]) -> pd.DataFrame:
     )
 
     for i, emb in enumerate(embeddings):
-        df.loc[i] = [emb.id,
+        df.loc[i] = [emb.obj_id,
                      emb.m_total_score,
                      emb.m_jaccard.size,
                      emb.m_q_local,
