@@ -47,7 +47,7 @@ def display_graphs(
             node_color=np.array(list(results[0].labels.values()))
             if results[0].labels is not None
             else "blue",
-            edge_color=results[0].edge_weights if show_edges else "white",
+            # edge_color=results[0].edge_weights if show_edges else "white",
             edge_vmin=0,
             edge_vmax=1,
             width=0.4,
@@ -82,7 +82,7 @@ def display_graphs(
                     edge_vmin=0,
                     edge_vmax=1,
                     width=0.4,
-                    alpha=0.6,
+                    alpha=1.0,
                     edge_cmap=edge_cmap,
                     cmap=cmap,
                 )

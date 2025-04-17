@@ -27,58 +27,6 @@ def generate_pairwise_threshold_graphs(
     return graph_thresholded, edge_weights
 
 
-def compute_local_force_directed(
-    graph: nx.Graph, initial_pos: npt.NDArray[np.float32], iterations: list[int]
-) -> npt.NDArray[np.float32]:
-    embeddings = []
-    embedding_dict = {i: initial_pos[i] for i in range(len(initial_pos))}
-
-    # compute the best partition
-    partition_dict = community_louvain.best_partition(graph)
-    partition_values = set(partition_dict.values())
-
-    for iteration in iterations:
-        print("------------------------------------------------------------")
-        print("Computing modified embedding for iteration: ", iteration)
-
-        iteration_embedding_dict = embedding_dict
-
-        for partition in partition_values:
-            subgraph = graph.subgraph(
-                [node for node, part in partition_dict.items() if part == partition]
-            )
-
-            subgraph_pos = {node: initial_pos[node] for node in subgraph.nodes}
-
-            subgraph_updated_pos = nx.spring_layout(
-                subgraph,
-                pos=subgraph_pos,
-                iterations=iteration,
-                threshold=0.0001,
-                weight="weight",
-                seed=0,
-            )
-
-            for node in subgraph.nodes():
-                iteration_embedding_dict[node] = subgraph_updated_pos[node]
-
-        emb = EmbeddingObj(
-            graph,
-            np.array(list(iteration_embedding_dict.values())),
-            np.array([]),
-            labels=partition_dict,
-        )
-
-        emb.obj_id = iteration
-        emb.title = "Position after " + str(iteration) + " iterations"
-        embeddings.append(emb)
-
-        print("Computation finished")
-        print("------------------------------------------------------------")
-
-    return embeddings
-
-
 def compute_force_directed(
     graph: nx.Graph, initial_pos: npt.NDArray[np.float32], iterations: list[int]
 ) -> list[EmbeddingObj]:
@@ -100,6 +48,107 @@ def compute_force_directed(
 
         emb.obj_id = iteration
         emb.title = "Position after " + str(iteration) + " iterations"
+        embeddings.append(emb)
+
+        print("Computation finished")
+        print("------------------------------------------------------------")
+
+    return embeddings
+
+
+def compute_local_force_directed(
+    graph: nx.Graph,
+    initial_pos: npt.NDArray[np.float32],
+    iterations: list[int],
+    threshold: Optional[float] = None,
+    mst: bool = False,
+) -> list[EmbeddingObj]:
+    partition_dict = community_louvain.best_partition(graph, random_state=0)
+
+    # remove edges with weight (similarity) smaller than the threshold
+    if threshold is not None:
+        graph_trimmed = graph.copy()
+        for u, v, w in graph.edges.data("weight"):
+            if w < threshold:
+                graph_trimmed.remove_edge(u, v)
+
+        graph = graph_trimmed
+
+    embeddings = []
+    embedding_dict = {i: initial_pos[i] for i in range(len(initial_pos))}
+    partition_values = set(partition_dict.values())
+    partition_centers_dict = dict()
+
+    # compute center-coordinates (bounding box) of each partition used in force-directed layout
+    for part_value in partition_values:
+        subgraph_points = [k for k, v in partition_dict.items() if v == part_value]
+        subgraph_points_coords = np.array([initial_pos[i] for i in subgraph_points])
+        min_x, min_y = subgraph_points_coords.min(axis=0)
+        max_x, max_y = subgraph_points_coords.max(axis=0)
+        partition_centers_dict[part_value] = ((min_x + max_x) / 2, (min_y + max_y) / 2)
+
+    for iteration in iterations:
+        print("------------------------------------------------------------")
+        print("Computing modified embedding for iteration: ", iteration)
+
+        iteration_embedding_dict = embedding_dict.copy()
+        iteration_graph = nx.Graph()
+
+        for partition in partition_values:
+            subgraph = graph.subgraph(
+                [node for node, part in partition_dict.items() if part == partition]
+            ).copy()
+
+            if mst:
+                # Invert weights, as similarity optimizes for 1, as MST-algorithms as Kruskal optimize for 0
+                for u, v in subgraph.edges:
+                    subgraph[u][v]["weight"] = 1 - subgraph[u][v]["weight"]
+
+                subgraph = nx.minimum_spanning_tree(subgraph)
+
+            subgraph_pos = {node: initial_pos[node] for node in subgraph.nodes}
+
+            subgraph_updated_pos = nx.spring_layout(
+                subgraph,
+                pos=subgraph_pos,
+                iterations=iteration,
+                threshold=0.0001,
+                weight="weight",
+                center=partition_centers_dict[partition],
+                k=5.0,
+                seed=0,
+            )
+
+            # subgraph_updated_pos = nx.forceatlas2_layout(
+            #     subgraph,
+            #     pos=subgraph_pos,
+            #     max_iter=iteration,
+            #     weight="weight",
+            #     seed=0,
+            # )
+
+            for node in subgraph.nodes():
+                iteration_embedding_dict[node] = subgraph_updated_pos[node]
+
+            iteration_graph.add_nodes_from(subgraph.nodes())
+            iteration_graph.add_edges_from(subgraph.edges())
+
+        emb = EmbeddingObj(
+            iteration_graph,
+            np.array(list(iteration_embedding_dict.values())),
+            np.array([]),
+            labels=partition_dict,
+        )
+
+        emb.obj_id = iteration
+        emb.title = "Positions after " + str(iteration) + " iterations"
+
+        if threshold is not None:
+            emb.title += f", edge-weight threshold: {threshold}"
+
+        if mst:
+            emb.title += ", only MST-edges used"
+
         embeddings.append(emb)
 
         print("Computation finished")
