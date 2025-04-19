@@ -62,7 +62,8 @@ def compute_local_force_directed(
     iterations: list[int],
     threshold: Optional[float] = None,
     mst: bool = False,
-) -> list[EmbeddingObj]:
+    boundary_edges: bool = False,
+) -> tuple[list[EmbeddingObj], dict[int, int]]:
     partition_dict = community_louvain.best_partition(graph, random_state=0)
 
     # remove edges with weight (similarity) smaller than the threshold
@@ -99,6 +100,20 @@ def compute_local_force_directed(
                 [node for node, part in partition_dict.items() if part == partition]
             ).copy()
 
+            if boundary_edges:
+                boundary_neighbors = []
+
+                for u, v in graph.edges():
+                    if u in subgraph.nodes() and v not in subgraph.nodes():
+                        boundary_neighbors.append(v)
+                        subgraph.add_node(v)
+                        subgraph.add_edge(u, v, weight=graph[u][v]["weight"])
+
+                    if v in subgraph.nodes() and u not in subgraph.nodes():
+                        boundary_neighbors.append(u)
+                        subgraph.add_node(u)
+                        subgraph.add_edge(v, u, weight=graph[v][u]["weight"])
+
             if mst:
                 # Invert weights, as similarity optimizes for 1, as MST-algorithms as Kruskal optimize for 0
                 for u, v in subgraph.edges:
@@ -112,6 +127,7 @@ def compute_local_force_directed(
                 subgraph,
                 pos=subgraph_pos,
                 iterations=iteration,
+                fixed=boundary_neighbors if boundary_edges else None,
                 threshold=0.0001,
                 weight="weight",
                 center=partition_centers_dict[partition],
@@ -154,7 +170,7 @@ def compute_local_force_directed(
         print("Computation finished")
         print("------------------------------------------------------------")
 
-    return embeddings
+    return embeddings, partition_dict
 
 
 def compute_pairwise_dist(
@@ -222,8 +238,6 @@ def fit(
     if method == "force-directed":
         embeddings = compute_force_directed(knn_graph, initial_pos, iterations)
     elif method == "local-force-directed":
-        embeddings = compute_local_force_directed(
-            knn_graph, initial_pos, iterations
-        )
+        embeddings = compute_local_force_directed(knn_graph, initial_pos, iterations)
 
     return embeddings
