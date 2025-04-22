@@ -24,6 +24,7 @@ def display_graphs(
     show_cbar: bool = True,
     cbar_labels: Optional[list[str]] = None,
     show_edges: bool = True,
+    show_partition_centers: bool = False,
 ) -> None:
     figsize_rows = math.ceil(len(results) / figsize_columns)
     fig, axs = plt.subplots(figsize_rows, figsize_columns, figsize=figsize)
@@ -39,65 +40,61 @@ def display_graphs(
             sm = plt.cm.ScalarMappable(cmap=cmap)
             # sm.set_array(cbar_labels)
 
-    if len(results) == 1:
-        nx.draw(
-            results[0].sim_graph,
-            pos=results[0].embedding,
-            node_size=30,
-            node_color=[results[0].labels[n] for n in results[0].sim_graph.nodes()]
-            if results[0].labels is not None
-            else "blue",
-            # edge_color=results[0].edge_weights if show_edges else "white",
-            edge_vmin=0,
-            edge_vmax=1,
-            width=0.4,
-            alpha=1.0,
-            edge_cmap=edge_cmap,
-            cmap=cmap,
-        )
+    axs = [axs] if len(results) == 1 else axs.flatten()
 
-        plt.title(results[0].title, fontsize=10)
+    for i in range(len(axs)):
+        if i < len(results):
+            graph = results[i].sim_graph.copy()
+            positions = results[i].embedding.copy()
+            node_sizes = [30] * len(graph.nodes())
+            node_colors = ["blue"] * len(graph.nodes())
+            edge_colors = ["white"] * len(graph.edges())
 
-        if show_cbar:
-            cbar = fig.colorbar(sm, ax=axs, shrink=0.8)
+            # add node labels (colors), if provided
+            if results[i].labels is not None:
+                node_colors = [results[i].labels[n] for n in graph.nodes()]
 
-            if cbar_labels is not None:
-                # cbar.set_ticks([norm(v) for v in range(len(cbar_labels))])
-                cbar.set_ticklabels(cbar_labels)
+            if show_edges:
+                edge_colors = results[i].edge_weights
 
-    else:
-        axs = axs.flatten()
+            # add partition centers to the graph (with dedicated size, color and position)
+            if show_partition_centers and results[i].partition_centers is not None:
+                start_idx = len(graph.nodes())
+                end_idx = len(graph.nodes()) + len(results[i].partition_centers)
+                node_idx = list(range(start_idx, end_idx))
 
-        for i in range(len(axs)):
-            if i < len(results):
-                nx.draw(
-                    results[i].sim_graph,
-                    ax=axs[i],
-                    pos=results[i].embedding,
-                    node_size=30,
-                    node_color=[
-                        results[i].labels[n] for n in results[i].sim_graph.nodes()
-                    ]
-                    if results[i].labels is not None
-                    else "blue",
-                    edge_color=results[i].edge_weights if show_edges else "white",
-                    edge_vmin=0,
-                    edge_vmax=1,
-                    width=0.4,
-                    alpha=1.0,
-                    edge_cmap=edge_cmap,
-                    cmap=cmap,
-                )
+                graph.add_nodes_from(node_idx)
 
-                axs[i].set_title(results[i].title, fontsize=10)
+                node_colors += [0] * len(results[i].partition_centers)
+                node_sizes += [120] * len(results[i].partition_centers)
 
-                if show_cbar:
-                    cbar = fig.colorbar(sm, ax=axs[i], shrink=0.8)
+                center_dict = dict(zip(node_idx, results[i].partition_centers.values()))
+                positions.update(center_dict)
 
-                    if cbar_labels is not None:
-                        cbar.set_ticklabels(cbar_labels)
-            else:
-                fig.delaxes(axs[i])
+            nx.draw(
+                graph,
+                ax=axs[i],
+                pos=positions,
+                node_size=node_sizes,
+                node_color=node_colors,
+                edge_color=edge_colors,
+                edge_vmin=0,
+                edge_vmax=1,
+                width=0.4,
+                alpha=1.0,
+                edge_cmap=edge_cmap,
+                cmap=cmap,
+            )
+
+            axs[i].set_title(results[i].title, fontsize=10)
+
+            if show_cbar:
+                cbar = fig.colorbar(sm, ax=axs[i], shrink=0.8)
+
+                if cbar_labels is not None:
+                    cbar.set_ticklabels(cbar_labels)
+        else:
+            fig.delaxes(axs[i])
 
 
 def compute_shepard_curve(

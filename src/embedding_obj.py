@@ -15,6 +15,7 @@ class EmbeddingObj:
     title: Optional[str]
 
     com_partition: Optional[dict[int,int]] = None
+    partition_centers: Optional[dict[int, npt.NDArray[np.float32]]] = None
     labels: Optional[dict[int, float]] = None
 
     coranking_matrix: Optional[npt.NDArray[int]] = None
@@ -32,7 +33,8 @@ class EmbeddingObj:
                  edge_weights: npt.NDArray[np.float32],
                  title: Optional[str] = None,
                  obj_id: Optional[float] = None,
-                 labels: Optional[dict[int, float]] = None) -> None:
+                 labels: Optional[dict[int, float]] = None,
+                 partition_centers: Optional[dict[int, npt.NDArray[np.float32]]] = None) -> None:
         self.sim_graph = graph
         self.embedding = embedding
         if len(edge_weights) == 0:
@@ -48,6 +50,7 @@ class EmbeddingObj:
             self.obj_id = obj_id
 
         self.labels = labels
+        self.partition_centers = partition_centers
 
     def __str__(self) -> str:
         return ("---------------------------------------\n"

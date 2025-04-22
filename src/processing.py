@@ -78,59 +78,93 @@ def compute_local_force_directed(
     embeddings = []
     embedding_dict = {i: initial_pos[i] for i in range(len(initial_pos))}
     partition_values = set(partition_dict.values())
-    partition_centers_dict = dict()
+
+    partition_centers = {}
+    partition_subgraphs = {}
+    partition_boundary_neighbors = {}
+    mod_graph = nx.Graph()
 
     # compute center-coordinates (bounding box) of each partition used in force-directed layout
-    for part_value in partition_values:
-        subgraph_points = [k for k, v in partition_dict.items() if v == part_value]
+    for partition in partition_values:
+        subgraph_points = [k for k, v in partition_dict.items() if v == partition]
         subgraph_points_coords = np.array([initial_pos[i] for i in subgraph_points])
         min_x, min_y = subgraph_points_coords.min(axis=0)
         max_x, max_y = subgraph_points_coords.max(axis=0)
-        partition_centers_dict[part_value] = ((min_x + max_x) / 2, (min_y + max_y) / 2)
+        partition_centers[partition] = ((min_x + max_x) / 2, (min_y + max_y) / 2)
+
+        # subgraph = graph.subgraph(
+        #     [node for node, part in partition_dict.items() if part == partition]
+        # ).copy()
+
+        subgraph_nodes = [
+            node for node, part in partition_dict.items() if part == partition
+        ]
+        subgraph = nx.Graph()
+        subgraph.add_nodes_from(subgraph_nodes)
+
+        for u, v in graph.edges():
+            if u in subgraph_nodes and v in subgraph_nodes:
+                subgraph.add_edge(u, v, weight=graph[u][v]["weight"])
+
+        if boundary_edges:
+            boundary_neighbors = []
+
+            for u, v in graph.edges():
+                if u in subgraph.nodes() and v not in subgraph.nodes():
+                    boundary_neighbors.append(v)
+                    subgraph.add_node(v)
+                    subgraph.add_edge(u, v, weight=graph[u][v]["weight"])
+
+                if v in subgraph.nodes() and u not in subgraph.nodes():
+                    boundary_neighbors.append(u)
+                    subgraph.add_node(u)
+                    subgraph.add_edge(v, u, weight=graph[v][u]["weight"])
+
+            partition_boundary_neighbors[partition] = boundary_neighbors
+
+        if mst:
+            # Invert weights, as similarity optimizes for 1, as MST-algorithms as Kruskal optimize for 0
+            for u, v in subgraph.edges:
+                subgraph[u][v]["weight"] = 1 - subgraph[u][v]["weight"]
+
+            subgraph = nx.minimum_spanning_tree(subgraph)
+
+        partition_subgraphs[partition] = subgraph
+
+        mod_graph.add_nodes_from(subgraph.nodes())
+        mod_graph.add_edges_from(subgraph.edges(data=True))
+
+    initial_emb = EmbeddingObj(
+        mod_graph,
+        embedding_dict,
+        np.array([]),
+        labels=partition_dict,
+        partition_centers=partition_centers,
+    )
+
+    initial_emb.obj_id = 0
+    initial_emb.title = "Initial positions"
+    embeddings.append(initial_emb)
 
     for iteration in iterations:
         print("------------------------------------------------------------")
         print("Computing modified embedding for iteration: ", iteration)
 
         iteration_embedding_dict = embedding_dict.copy()
-        iteration_graph = nx.Graph()
 
-        for partition in partition_values:
-            subgraph = graph.subgraph(
-                [node for node, part in partition_dict.items() if part == partition]
-            ).copy()
-
-            if boundary_edges:
-                boundary_neighbors = []
-
-                for u, v in graph.edges():
-                    if u in subgraph.nodes() and v not in subgraph.nodes():
-                        boundary_neighbors.append(v)
-                        subgraph.add_node(v)
-                        subgraph.add_edge(u, v, weight=graph[u][v]["weight"])
-
-                    if v in subgraph.nodes() and u not in subgraph.nodes():
-                        boundary_neighbors.append(u)
-                        subgraph.add_node(u)
-                        subgraph.add_edge(v, u, weight=graph[v][u]["weight"])
-
-            if mst:
-                # Invert weights, as similarity optimizes for 1, as MST-algorithms as Kruskal optimize for 0
-                for u, v in subgraph.edges:
-                    subgraph[u][v]["weight"] = 1 - subgraph[u][v]["weight"]
-
-                subgraph = nx.minimum_spanning_tree(subgraph)
-
-            subgraph_pos = {node: initial_pos[node] for node in subgraph.nodes}
+        for part_key, part_graph in partition_subgraphs.items():
+            subgraph_pos = {node: initial_pos[node] for node in part_graph.nodes}
 
             subgraph_updated_pos = nx.spring_layout(
-                subgraph,
+                part_graph,
                 pos=subgraph_pos,
                 iterations=iteration,
-                fixed=boundary_neighbors if boundary_edges else None,
+                fixed=partition_boundary_neighbors[part_key]
+                if boundary_edges
+                else None,
                 threshold=0.0001,
                 weight="weight",
-                center=partition_centers_dict[partition],
+                center=partition_centers[part_key],
                 k=5.0,
                 seed=0,
             )
@@ -143,27 +177,28 @@ def compute_local_force_directed(
             #     seed=0,
             # )
 
-            for node in subgraph.nodes():
+            for node in part_graph.nodes():
                 iteration_embedding_dict[node] = subgraph_updated_pos[node]
 
-            iteration_graph.add_nodes_from(subgraph.nodes())
-            iteration_graph.add_edges_from(subgraph.edges())
-
         emb = EmbeddingObj(
-            iteration_graph,
-            np.array(list(iteration_embedding_dict.values())),
+            mod_graph,
+            iteration_embedding_dict,
             np.array([]),
             labels=partition_dict,
+            partition_centers=partition_centers,
         )
 
         emb.obj_id = iteration
         emb.title = "Positions after " + str(iteration) + " iterations"
 
+        if boundary_edges:
+            emb.title += ", boundary edges added"
+
         if threshold is not None:
             emb.title += f", edge-weight threshold: {threshold}"
 
         if mst:
-            emb.title += ", only MST-edges used"
+            emb.title += ", MST-edges used"
 
         embeddings.append(emb)
 
