@@ -10,7 +10,7 @@ import numpy.typing as npt
 class EmbeddingObj:
     obj_id: float
     sim_graph: nx.Graph
-    embedding: npt.NDArray[np.float32]
+    embedding: dict[int, npt.NDArray[np.float32]]
     edge_weights: npt.NDArray[np.float32]
     title: Optional[str]
 
@@ -28,7 +28,7 @@ class EmbeddingObj:
 
     def __init__(self,
                  graph: nx.Graph,
-                 embedding: npt.NDArray[np.float32],
+                 embedding: dict[int, npt.NDArray[np.float32]],
                  edge_weights: npt.NDArray[np.float32],
                  title: Optional[str] = None,
                  obj_id: Optional[float] = None,
@@ -54,7 +54,7 @@ class EmbeddingObj:
                 f"Embedding object (ID: {self.obj_id})\n"
                 f"Title: '{self.title}'\n"
                 f"Graph: {self.sim_graph}\n"
-                f"Embedding shape: {self.embedding.shape}\n"
+                f"Embedding shape: {len(self.embedding.items())}\n"
                 f"Shape of edge weights: {self.edge_weights.shape}\n\n"
                 f"Total score: {self.m_total_score if self.m_total_score is not None else 'not computed'}\n"
                 "---------------------------------------")

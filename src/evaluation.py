@@ -166,7 +166,7 @@ def compute_global_metrics(
         start_time = time.time()
 
         # compute pairwise distances + ranking matrix for lowdim data
-        lowdim_df = pd.DataFrame(emb.embedding, index=None)
+        lowdim_df = pd.DataFrame(emb.embedding.values(), index=None)
         D_lowdim = pd.DataFrame(pairwise_distances(lowdim_df.values)).values
         D_lowdim_rank = [np.argsort(np.argsort(row)) for row in D_lowdim]
 
@@ -235,7 +235,7 @@ def compute_pairwise_metrics(
         start_time = time.time()
 
         emb.m_jaccard = compute_jaccard_distances(
-            highdim_data, emb.embedding, nhood_size=7
+            highdim_data, np.array(emb.embedding.values()), nhood_size=7
         )
         end_time = time.time()
         print("Computation time: ", end_time - start_time)

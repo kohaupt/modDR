@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import Any
 
+import numpy as np
 import plotly.express as px  # type: ignore
 from dash import Dash, Input, Output, callback, dcc, html  # type: ignore
 
@@ -58,8 +59,12 @@ class DashOverlay:
         )  # type: ignore
         def update_graph(iteration_value: int) -> px.scatter:
             fig = px.scatter(
-                x=self.data[self.iterations.index(iteration_value)].embedding[:, 0],
-                y=self.data[self.iterations.index(iteration_value)].embedding[:, 1],
+                x=np.array(
+                    self.data[self.iterations.index(iteration_value)].embedding.values()
+                )[:, 0],
+                y=np.array(
+                    self.data[self.iterations.index(iteration_value)].embedding.values()
+                )[:, 1],
                 color=self.data[self.iterations.index(iteration_value)].m_jaccard,
                 color_continuous_scale="inferno",
                 range_color=self.color_range,

@@ -44,7 +44,7 @@ def display_graphs(
             results[0].sim_graph,
             pos=results[0].embedding,
             node_size=30,
-            node_color=np.array(list(results[0].labels.values()))
+            node_color=[results[0].labels[n] for n in results[0].sim_graph.nodes()]
             if results[0].labels is not None
             else "blue",
             # edge_color=results[0].edge_weights if show_edges else "white",
@@ -75,7 +75,9 @@ def display_graphs(
                     ax=axs[i],
                     pos=results[i].embedding,
                     node_size=30,
-                    node_color=np.array(list(results[i].labels.values()))
+                    node_color=[
+                        results[i].labels[n] for n in results[i].sim_graph.nodes()
+                    ]
                     if results[i].labels is not None
                     else "blue",
                     edge_color=results[i].edge_weights if show_edges else "white",
@@ -122,7 +124,7 @@ def plot_shepard_diagram(
     highdim_df_filtered = highdim_df[target_features].values.reshape(-1, 1)
 
     sim_highdim = pdist(highdim_df_filtered)
-    sim_lowdim = pdist(embedding.embedding)
+    sim_lowdim = pdist(np.array(embedding.embedding.values()))
 
     scaler = MinMaxScaler()
     sim_highdim = scaler.fit_transform(sim_highdim.reshape(-1, 1)).flatten()
