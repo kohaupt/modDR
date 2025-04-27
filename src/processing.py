@@ -5,7 +5,7 @@ import numpy as np
 import numpy.typing as npt
 import pandas as pd
 from community import community_louvain
-from sklearn.metrics import pairwise_distances  # type: ignore
+from sklearn.metrics import euclidean_distances  # type: ignore
 from sklearn.neighbors import kneighbors_graph  # type: ignore
 from sklearn.preprocessing import MinMaxScaler  # type: ignore
 
@@ -209,16 +209,20 @@ def compute_local_force_directed(
 
 
 def compute_pairwise_dist(
-    df: pd.DataFrame, sim_features: list[str]
+    df: pd.DataFrame, sim_features: list[str], invert=True
 ) -> npt.NDArray[np.float32]:
     connectivity_saturation_pairwise = np.float32(
-        pairwise_distances(df.loc[:, sim_features], metric="manhattan")
+        euclidean_distances(df.loc[:, sim_features])
     )
 
     connectivity_saturation_pairwise = MinMaxScaler().fit_transform(
         connectivity_saturation_pairwise
     )
     # connectivity_saturation_pairwise = np.round(connectivity_saturation_pairwise, 3)
+
+    if invert:
+        connectivity_saturation_pairwise = 1 - connectivity_saturation_pairwise
+
     return connectivity_saturation_pairwise
 
 
@@ -237,7 +241,7 @@ def compute_graph_weights(
 
     edge_weights_knn = np.array([])
     for u, v in knn_graph_nx.edges():
-        np.append(edge_weights_knn, pairwise_dists[u][v])
+        edge_weights_knn = np.append(edge_weights_knn, [pairwise_dists[u][v]])
         knn_graph_nx[u][v]["weight"] = pairwise_dists[u][v]
 
     return knn_graph_nx, edge_weights_knn
@@ -262,11 +266,10 @@ def fit(
         )
         knn_graph = nx.Graph(knn_graph)
 
-    else:
-        pairwise_dists = compute_pairwise_dist(data, sim_features)
+    pairwise_dists = compute_pairwise_dist(data, sim_features)
 
-        for u, v in knn_graph.edges():
-            knn_graph[u][v]["weight"] = pairwise_dists[u][v]
+    for u, v in knn_graph.edges():
+        knn_graph[u][v]["weight"] = pairwise_dists[u][v]
 
     embeddings = []
 

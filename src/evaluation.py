@@ -235,7 +235,7 @@ def compute_pairwise_metrics(
         start_time = time.time()
 
         emb.m_jaccard = compute_jaccard_distances(
-            highdim_data, np.array(emb.embedding.values()), nhood_size=7
+            highdim_data, np.array(list(emb.embedding.values())), nhood_size=7
         )
         end_time = time.time()
         print("Computation time: ", end_time - start_time)

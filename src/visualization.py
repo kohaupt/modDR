@@ -121,7 +121,7 @@ def plot_shepard_diagram(
     highdim_df_filtered = highdim_df[target_features].values.reshape(-1, 1)
 
     sim_highdim = pdist(highdim_df_filtered)
-    sim_lowdim = pdist(np.array(embedding.embedding.values()))
+    sim_lowdim = pdist(np.array(list(embedding.embedding.values())))
 
     scaler = MinMaxScaler()
     sim_highdim = scaler.fit_transform(sim_highdim.reshape(-1, 1)).flatten()
