@@ -33,6 +33,12 @@ def compute_force_directed(
     embeddings = []
     embedding_dict = {i: initial_pos[i] for i in range(len(initial_pos))}
 
+    initial_emb = EmbeddingObj(graph, embedding_dict, np.array([]))
+
+    initial_emb.obj_id = 0
+    initial_emb.title = "Initial positions"
+    embeddings.append(initial_emb)
+
     for iteration in iterations:
         print("------------------------------------------------------------")
         print("Computing modified embedding for iteration: ", iteration)
@@ -44,7 +50,7 @@ def compute_force_directed(
             threshold=0.0001,
         )
 
-        emb = EmbeddingObj(graph, np.array(list(pos_dict.values())), np.array([]))
+        emb = EmbeddingObj(graph, pos_dict, np.array([]))
 
         emb.obj_id = iteration
         emb.title = "Position after " + str(iteration) + " iterations"
@@ -63,6 +69,8 @@ def compute_local_force_directed(
     threshold: Optional[float] = None,
     mst: bool = False,
     boundary_edges: bool = False,
+    method: str = "kawai",
+    pairwise_dists: Optional[npt.NDArray[np.float32]] = None,
 ) -> tuple[list[EmbeddingObj], dict[int, int]]:
     partition_dict = community_louvain.best_partition(graph, random_state=0)
 
@@ -146,6 +154,51 @@ def compute_local_force_directed(
     initial_emb.title = "Initial positions"
     embeddings.append(initial_emb)
 
+    if method == "fr":
+        embeddings += compute_spring_electrical_layout(
+            graph.copy(),
+            embedding_dict.copy(),
+            partition_centers,
+            iterations,
+            partition_subgraphs,
+            partition_dict,
+            partition_boundary_neighbors,
+            threshold=threshold,
+            mst=mst,
+            boundary_edges=boundary_edges,
+        )
+    elif method == "kawai":
+        embeddings += [
+            compute_kamada_kawai_layout(
+                graph.copy(),
+                embedding_dict.copy(),
+                partition_centers,
+                partition_subgraphs,
+                partition_dict,
+                threshold=threshold,
+                mst=mst,
+                boundary_edges=boundary_edges,
+                pairwise_dists=pairwise_dists,
+            )
+        ]
+
+    return embeddings, partition_dict
+
+
+def compute_spring_electrical_layout(
+    graph: nx.Graph,
+    embedding_dict: dict[int, npt.NDArray[np.float32]],
+    partition_centers: dict[int, npt.NDArray[np.float32]],
+    iterations: list[int],
+    partition_subgraphs=dict[int, nx.Graph],
+    partition_dict=dict[int, float],
+    partition_boundary_neighbors=dict[int, npt.NDArray[int]],
+    threshold: Optional[float] = None,
+    mst: bool = False,
+    boundary_edges: bool = False,
+) -> list[EmbeddingObj]:
+    embeddings = []
+
     for iteration in iterations:
         print("------------------------------------------------------------")
         print("Computing modified embedding for iteration: ", iteration)
@@ -153,7 +206,7 @@ def compute_local_force_directed(
         iteration_embedding_dict = embedding_dict.copy()
 
         for part_key, part_graph in partition_subgraphs.items():
-            subgraph_pos = {node: initial_pos[node] for node in part_graph.nodes}
+            subgraph_pos = {node: embedding_dict[node] for node in part_graph.nodes}
 
             subgraph_updated_pos = nx.spring_layout(
                 part_graph,
@@ -169,19 +222,21 @@ def compute_local_force_directed(
                 seed=0,
             )
 
-            # subgraph_updated_pos = nx.forceatlas2_layout(
-            #     subgraph,
+            # subgraph_pos = {
+            #     node: subgraph_updated_pos[node] for node in part_graph.nodes
+            # }
+            # subgraph_updated_pos = nx.kamada_kawai_layout(
+            #     part_graph,
             #     pos=subgraph_pos,
-            #     max_iter=iteration,
-            #     weight="weight",
-            #     seed=0,
+            #     center=partition_centers[part_key],
+            #     scale=5.0,
             # )
 
             for node in part_graph.nodes():
                 iteration_embedding_dict[node] = subgraph_updated_pos[node]
 
         emb = EmbeddingObj(
-            mod_graph,
+            graph,
             iteration_embedding_dict,
             np.array([]),
             labels=partition_dict,
@@ -205,7 +260,77 @@ def compute_local_force_directed(
         print("Computation finished")
         print("------------------------------------------------------------")
 
-    return embeddings, partition_dict
+    return embeddings
+
+
+def compute_kamada_kawai_layout(
+    graph: nx.Graph,
+    embedding_dict: dict[int, npt.NDArray[np.float32]],
+    partition_centers: dict[int, npt.NDArray[np.float32]],
+    partition_subgraphs=dict[int, nx.Graph],
+    partition_dict=dict[int, float],
+    threshold: Optional[float] = None,
+    mst: bool = False,
+    boundary_edges: bool = False,
+    pairwise_dists: Optional[npt.NDArray[np.float32]] = None,
+) -> EmbeddingObj:
+    modified_embedding_dict = embedding_dict.copy()
+
+    # for u, v in graph.edges:
+    #     graph[u][v]["weight"] = 1 - graph[u][v]["weight"]
+
+    node_list = list(graph.nodes)
+
+    pairwise_dists_dict = {
+        node_list[i]: {
+            node_list[j]: pairwise_dists[i][j] for j in range(len(node_list)) if i != j
+        }
+        for i in range(len(node_list))
+    }
+
+    print("------------------------------------------------------------")
+    print("Computing modified embedding via Kamada Kawai-layouting")
+
+    for part_key, part_graph in partition_subgraphs.items():
+        subgraph_pos = {node: embedding_dict[node] for node in part_graph.nodes}
+
+        subgraph_updated_pos = nx.kamada_kawai_layout(
+            part_graph,
+            dist=pairwise_dists_dict,
+            pos=subgraph_pos,
+            center=partition_centers[part_key],
+            weight=None,
+            scale=5.0,
+        )
+
+        for node in part_graph.nodes():
+            modified_embedding_dict[node] = subgraph_updated_pos[node]
+
+    emb = EmbeddingObj(
+        graph,
+        modified_embedding_dict,
+        np.array([]),
+        labels=partition_dict,
+        partition_centers=partition_centers,
+    )
+
+    # TODO: add unique-id generation
+    emb.obj_id = 1000
+    emb.title = "Positions after Kamada Kawai-layouting"
+
+    if boundary_edges:
+        emb.title += ", boundary edges added"
+
+    if threshold is not None:
+        emb.title += f", edge-weight threshold: {threshold}"
+
+    if mst:
+        emb.title += ", MST-edges used"
+
+    print("Computation finished")
+    print("------------------------------------------------------------")
+
+    return emb
 
 
 def compute_pairwise_dist(
