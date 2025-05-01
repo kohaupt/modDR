@@ -137,6 +137,10 @@ def compute_local_force_directed(
 
             subgraph = nx.minimum_spanning_tree(subgraph)
 
+            # Revert weights to initial scaling
+            for u, v in subgraph.edges:
+                subgraph[u][v]["weight"] = 1 - subgraph[u][v]["weight"]
+
         partition_subgraphs[partition] = subgraph
 
         mod_graph.add_nodes_from(subgraph.nodes())
