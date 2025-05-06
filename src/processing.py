@@ -5,7 +5,7 @@ import numpy as np
 import numpy.typing as npt
 import pandas as pd
 from community import community_louvain
-from sklearn.metrics import euclidean_distances  # type: ignore
+from scipy.spatial.distance import pdist, squareform
 from sklearn.neighbors import kneighbors_graph  # type: ignore
 from sklearn.preprocessing import MinMaxScaler  # type: ignore
 
@@ -337,22 +337,32 @@ def compute_kamada_kawai_layout(
     return emb
 
 
-def compute_pairwise_dist(
-    df: pd.DataFrame, sim_features: list[str], invert=True
+def compute_pairwise_dists(
+    df: pd.DataFrame,
+    sim_features: Optional[list[str]],
+    normalize: bool = True,
+    apply_squareform: bool = True,
+    invert: bool = True,
 ) -> npt.NDArray[np.float32]:
-    connectivity_saturation_pairwise = np.float32(
-        euclidean_distances(df.loc[:, sim_features])
-    )
+    input_data = []
 
-    connectivity_saturation_pairwise = MinMaxScaler().fit_transform(
-        connectivity_saturation_pairwise
-    )
-    # connectivity_saturation_pairwise = np.round(connectivity_saturation_pairwise, 3)
+    if sim_features is not None and sim_features != []:
+        input_data = df[sim_features].to_numpy()
+    else:
+        input_data = df.to_numpy()
+
+    distances = pdist(input_data, metric="euclidean")
+
+    if normalize:
+        distances = MinMaxScaler().fit_transform(distances.reshape(-1, 1)).flatten()
+
+    if apply_squareform:
+        distances = squareform(distances)
 
     if invert:
-        connectivity_saturation_pairwise = 1 - connectivity_saturation_pairwise
+        distances = 1 - distances
 
-    return connectivity_saturation_pairwise
+    return distances.astype(np.float32)
 
 
 def compute_graph_weights(
