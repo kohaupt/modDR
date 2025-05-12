@@ -342,7 +342,8 @@ def compute_pairwise_dists(
     sim_features: Optional[list[str]],
     normalize: bool = True,
     apply_squareform: bool = True,
-    invert: bool = True,
+    invert: bool = False,
+    sim_features: Optional[list[str]] = None,
 ) -> npt.NDArray[np.float32]:
     input_data = []
 
@@ -359,23 +360,36 @@ def compute_pairwise_dists(
     if apply_squareform:
         distances = squareform(distances)
 
-    if invert:
+    if invert and normalize:
+        print(
+            "INFO: Inverting distances via 1 - distances, as normalization is applied."
+        )
         distances = 1 - distances
+
+    # TODO: check if this case is needed and prevent division by zero
+    if invert and not normalize:
+        print(
+            "INFO: Inverting distances via 1 / distances, as no normalization is applied."
+        )
+        distances = 1 / distances
 
     return distances.astype(np.float32)
 
 
-def compute_graph_weights(
+def compute_knn_graph(
     df: pd.DataFrame,
-    sim_features: list[str],
     n_neighbors: int = 3,
     mode: str = "distance",
+    sim_features: Optional[list[str]] = None,
 ) -> tuple[nx.Graph, npt.NDArray[np.float32]]:
-    knn_graph = kneighbors_graph(
-        df.loc[:, sim_features], n_neighbors=n_neighbors, mode=mode
-    )
+    if sim_features is None or len(sim_features) == 0:
+        knn_graph = kneighbors_graph(df, n_neighbors=n_neighbors, mode=mode)
+    else:
+        knn_graph = kneighbors_graph(
+            df.loc[:, sim_features], n_neighbors=n_neighbors, mode=mode
+        )
 
-    pairwise_dists = compute_pairwise_dist(df, sim_features)
+    pairwise_dists = compute_pairwise_dists(df, sim_features=sim_features)
     knn_graph_nx = nx.Graph(knn_graph)
 
     edge_weights_knn = np.array([])
@@ -405,7 +419,7 @@ def fit(
         )
         knn_graph = nx.Graph(knn_graph)
 
-    pairwise_dists = compute_pairwise_dist(data, sim_features)
+    pairwise_dists = compute_pairwise_dists(data, sim_features)
 
     for u, v in knn_graph.edges():
         knn_graph[u][v]["weight"] = pairwise_dists[u][v]
