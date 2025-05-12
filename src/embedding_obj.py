@@ -24,6 +24,7 @@ class EmbeddingObj:
     m_trustworthiness: float = 0.0
     m_continuity: float = 0.0
     m_shepard_spearman: float = 0.0
+    m_kruskal_stress_community: float = 0.0
     m_kruskal_stress: float = 0.0
     m_total_score: float = 0.0
 
