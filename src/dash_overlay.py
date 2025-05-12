@@ -1,7 +1,6 @@
 from dataclasses import dataclass
 from typing import Any
 
-import numpy as np
 import plotly.express as px  # type: ignore
 from dash import Dash, Input, Output, callback, dcc, html  # type: ignore
 
@@ -30,7 +29,12 @@ class DashOverlay:
         self.app.layout = html.Div(
             [
                 html.Div(
-                    [dcc.Graph(id="crossfilter-indicator-scatter")],
+                    [
+                        dcc.Graph(
+                            id="crossfilter-indicator-scatter",
+                            style={"width": "100%", "height": "500px"},
+                        )
+                    ],
                     style={
                         "width": "100%",
                         "display": "inline-block",
@@ -39,10 +43,10 @@ class DashOverlay:
                 ),
                 html.Div(
                     dcc.Slider(
-                        self.iterations[0],
-                        self.iterations[-1],
-                        step=None,
-                        value=self.iterations[0],
+                        min=min(self.iterations),
+                        max=max(self.iterations),
+                        step=1,
+                        value=min(self.iterations),
                         marks={
                             str(iteration): str(iteration)
                             for iteration in self.iterations
@@ -50,7 +54,10 @@ class DashOverlay:
                         id="crossfilter-iteration--slider",
                     ),
                 ),
-            ]
+            ],
+            style={
+                "width": "90%",
+            },
         )
 
         @callback(
@@ -59,28 +66,44 @@ class DashOverlay:
         )  # type: ignore
         def update_graph(iteration_value: int) -> px.scatter:
             fig = px.scatter(
-                x=np.array(
-                    self.data[self.iterations.index(iteration_value)].embedding.values()
-                )[:, 0],
-                y=np.array(
-                    self.data[self.iterations.index(iteration_value)].embedding.values()
-                )[:, 1],
-                color=self.data[self.iterations.index(iteration_value)].m_jaccard,
-                color_continuous_scale="inferno",
-                range_color=self.color_range,
-                labels={"color": "Metrics Score"},
+                x=[
+                    coord[0]
+                    for coord in list(
+                        [x for x in self.data if x.obj_id == iteration_value][
+                            0
+                        ].embedding.values()
+                    )
+                ],
+                y=[
+                    coord[1]
+                    for coord in list(
+                        [x for x in self.data if x.obj_id == iteration_value][
+                            0
+                        ].embedding.values()
+                    )
+                ],
+                # color=self.data[self.iterations.index(iteration_value)].labels,
+                # color_continuous_scale="inferno",
+                # range_color=self.color_range,
+                # labels={"color": "Metrics Score"},
+                opacity=0.8,
             )
 
             fig.update_layout(
-                margin={"l": 40, "b": 40, "t": 10, "r": 0}, hovermode="closest"
+                margin={"l": 40, "b": 40, "t": 10, "r": 0},
+                hovermode="closest",
+                plot_bgcolor="white",
             )
+
+            fig.update_xaxes(showgrid=False)
+            fig.update_yaxes(showgrid=False)
 
             return fig
 
     def compute_color_scale(self) -> list[float]:
         scores = []
         for i in range(len(self.data)):
-            scores.extend(self.data[i].m_jaccard)
+            scores.extend(list(self.data[i].labels.values()))
 
         return [min(scores), max(scores)]
 
