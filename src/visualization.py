@@ -81,7 +81,7 @@ def display_graphs(
                 edge_vmin=0,
                 edge_vmax=1,
                 width=0.4,
-                alpha=1.0,
+                alpha=0.7,
                 edge_cmap=edge_cmap,
                 cmap=cmap,
             )
@@ -162,5 +162,13 @@ def plot_metrics_report(data: pd.DataFrame) -> None:
         id_vars="marker", var_name="Feature", value_name="Value"
     )
     sb.set_style("whitegrid", {"axes.grid": False})
-    sb.lineplot(data=df_melted, x="marker", y="Value", hue="Feature", palette="muted",
-                marker="o")
+    ax = sb.lineplot(
+        data=df_melted,
+        x="marker",
+        y="Value",
+        hue="Feature",
+        palette="muted",
+        marker="o",
+    )
+
+    sb.move_legend(ax, "upper left", bbox_to_anchor=(1, 1))
