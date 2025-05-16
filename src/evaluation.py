@@ -224,8 +224,12 @@ def compute_global_metrics(
 
             kruskal_com += compute_kruskal_stress(highdim_com_dists, lowdim_com_dists)
 
+        # normalize by number of communities
         kruskal_com = kruskal_com / len(set(emb.com_partition.values()))
         emb.m_kruskal_stress_community = kruskal_com
+
+        D_highdim_feat = squareform(D_highdim_feat)
+        D_lowdim = squareform(D_lowdim)
 
         emb.m_kruskal_stress = compute_kruskal_stress(D_highdim_feat, D_lowdim)
         emb.m_shepard_spearman = metric_spearman(D_highdim_feat, D_lowdim)
