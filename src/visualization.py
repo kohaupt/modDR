@@ -6,6 +6,7 @@ import networkx as nx
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
+import plotly.figure_factory as ff
 import seaborn as sb
 from numpy.typing import ArrayLike
 from scipy.spatial.distance import pdist
@@ -231,3 +232,99 @@ def plot_metrics_report_new(
     plt.title("Metrics Report", fontsize=14, weight="bold")
     plt.tight_layout()
     plt.show()
+
+
+def plot_pos_movements(
+    source: EmbeddingObj,
+    target: EmbeddingObj,
+    figsize: tuple[int, int] = (15, 15),
+    community_colors: bool = False,
+) -> tuple[plt.Figure, plt.Axes]:
+    coords_source = np.array(list(source.embedding.values()))
+    coords_target = np.array(list(target.embedding.values()))
+
+    u = coords_target[:, 0] - coords_source[:, 0]
+    v = coords_target[:, 1] - coords_source[:, 1]
+
+    fig, ax = plt.subplots(figsize=figsize)
+
+    if community_colors:
+        plt.quiver(
+            coords_source[:, 0],
+            coords_source[:, 1],
+            u,
+            v,
+            list(target.com_partition.values()),
+            cmap="viridis",
+            angles="xy",
+            scale_units="xy",
+            scale=1,
+            width=0.001,
+            headwidth=4,
+            alpha=0.5,
+        )
+    else:
+        plt.quiver(
+            coords_source[:, 0],
+            coords_source[:, 1],
+            u,
+            v,
+            cmap="viridis",
+            angles="xy",
+            scale_units="xy",
+            scale=1,
+            width=0.001,
+            headwidth=4,
+            alpha=0.5,
+        )
+
+    all_x = np.concatenate([coords_source[:, 0], coords_target[:, 0]])
+    all_y = np.concatenate([coords_source[:, 1], coords_target[:, 1]])
+
+    ax.set_title(
+        f"Position movements from '{source.title}' to '{target.title}'", fontsize=10
+    )
+    ax.set_xlim(all_x.min() - 0.5, all_x.max() + 0.5)
+    ax.set_ylim(all_y.min() - 0.5, all_y.max() + 0.5)
+    ax.set_axis_off()
+    plt.tight_layout()
+    plt.show()
+
+    return fig, ax
+
+
+def plot_pos_movements_px(
+    source: EmbeddingObj,
+    target: EmbeddingObj,
+) -> None:
+    x = np.array(list(source.embedding.values()))
+    y = np.array(list(target.embedding.values()))
+
+    u = y[:, 0] - x[:, 0]
+    v = y[:, 1] - x[:, 1]
+
+    # Create quiver figure
+    fig = ff.create_quiver(
+        x[:, 0],
+        y[:, 1],
+        u,
+        v,
+        scale=1,
+        name="quiver",
+        line_width=1.5,
+    )
+
+    fig.update_xaxes(
+        visible=False, showgrid=False, zeroline=False, showticklabels=False
+    )
+    fig.update_yaxes(
+        visible=False, showgrid=False, zeroline=False, showticklabels=False
+    )
+    fig.update_layout(
+        margin=dict(l=0, r=0, t=0, b=0),
+        template="presentation",
+        height=1000,
+        width=1000,
+    )
+
+    fig.show()
