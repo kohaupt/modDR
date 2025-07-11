@@ -145,6 +145,9 @@ def compute_global_metrics(
     highdim_df: pd.DataFrame,
     embeddings: list[EmbeddingObj],
     target_features: list[str],
+    fixed_k: Optional[int] = None,
+    ranking_metrics: bool = True,
+    distance_metrics: bool = True,
 ) -> list[EmbeddingObj]:
     # compute pairwise distances + ranking matrix for highdim data
     D_highdim = processing.compute_pairwise_dists(highdim_df)
@@ -160,79 +163,123 @@ def compute_global_metrics(
         D_lowdim = processing.compute_pairwise_dists(lowdim_df)
         D_lowdim_rank = [np.argsort(np.argsort(row)) for row in D_lowdim]
 
-        cr_matrix = coranking_matrix(
-            np.asarray(D_highdim_rank, dtype=int), np.asarray(D_lowdim_rank, dtype=int)
-        )
+        if ranking_metrics:
+            cr_matrix = coranking_matrix(
+                np.asarray(D_highdim_rank, dtype=int),
+                np.asarray(D_lowdim_rank, dtype=int),
+            )
 
-        Q = cr_matrix[1:, 1:]
-        m = len(Q)
+            Q = cr_matrix[1:, 1:]
+            m = len(Q)
 
-        T = np.zeros(m - 1)  # trustworthiness
-        C = np.zeros(m - 1)  # continuity
-        QNN = np.zeros(m)  # Co-k-nearest neighbor size
-        LCMC = np.zeros(m)  # Local Continuity Meta Criterion
+            T = np.zeros(m - 1)  # trustworthiness
+            C = np.zeros(m - 1)  # continuity
+            R = np.zeros(m - 1)  # R-Quality (Rnx)
+            QNN = np.zeros(m)  # Co-k-nearest neighbor size
+            LCMC = np.zeros(m)  # Local Continuity Meta Criterion
 
-        # for k in range(m - 1):
-        #     Qs = Q[k:, :k]
-        #     W = np.arange(Qs.shape[0]).reshape(
-        #         -1, 1
-        #     )  # a column vector of weights. weight = rank error = actual_rank - k
-        #     T[k] = (
-        #         1 - np.sum(Qs * W) / (k + 1) / m / (m - 1 - k)
-        #     )  # 1 - normalized hard-k-intrusions. lower-left region. weighted by rank error (rank - k)
-        #     Qs = Q[:k, k:]
-        #     W = np.arange(Qs.shape[1]).reshape(
-        #         1, -1
-        #     )  # a row vector of weights. weight = rank error = actual_rank - k
-        #     C[k] = 1 - np.sum(Qs * W) / (k + 1) / m / (
-        #         m - 1 - k
-        #     )  # 1 - normalized hard-k-extrusions. upper-right region
-        #
-        #
-        # Qglobal = np.sum(QNN[kmax:-1])/(m - kmax -1) # skip the last. The last is (m-1)-nearest neighbor, including all samples.
-        # AUC = np.mean(QNN)
-        # emb.m_trustworthiness = np.mean(T)
-        # emb.m_continuity = np.mean(C)
+            Q_cumsum = np.cumsum(np.cumsum(Q, axis=0), axis=1)
+            diag_idxs = np.arange(m)
+            QNN = Q_cumsum[diag_idxs, diag_idxs] / ((diag_idxs + 1) * m)
+            LCMC = QNN - (diag_idxs + 1) / (m - 1)
 
-        Q_cumsum = np.cumsum(np.cumsum(Q, axis=0), axis=1)
-        diag_idxs = np.arange(m)
-        QNN = Q_cumsum[diag_idxs, diag_idxs] / ((diag_idxs + 1) * m)
-        LCMC = QNN - (diag_idxs + 1) / (m - 1)
+            kmax = np.argmax(LCMC)
+            Qlocal = np.sum(QNN[: kmax + 1]) / (kmax + 1)
 
-        kmax = np.argmax(LCMC)
-        Qlocal = np.sum(QNN[: kmax + 1]) / (kmax + 1)
+            # TODO: add further validation for fixed_k
+            if fixed_k is None:
+                for k in range(m - 1):
+                    Qs = Q[k:, :k]
+                    W = np.arange(
+                        Qs.shape[0]
+                    ).reshape(
+                        -1, 1
+                    )  # a column vector of weights. weight = rank error = actual_rank - k
+                    T[k] = (
+                        1 - np.sum(Qs * W) / (k + 1) / m / (m - 1 - k)
+                    )  # 1 - normalized hard-k-intrusions. lower-left region. weighted by rank error (rank - k)
 
-        emb.coranking_matrix = cr_matrix
-        emb.m_q_local = Qlocal
+                    C[k] = 1 - np.sum(Qs * W) / (k + 1) / m / (
+                        m - 1 - k
+                    )  # 1 - normalized hard-k-extrusions. upper-right region
 
-        D_highdim_feat = processing.compute_pairwise_dists(
-            highdim_df, sim_features=target_features
-        )
+                    R[k] = (m * QNN[k - 1] - k) / (m - k)
 
-        kruskal_com = 0.0
-        for part in set(emb.com_partition.values()):
-            part_keys = [k for k, v in emb.com_partition.items() if v == part]
+                emb.m_trustworthiness = np.mean(T)
+                emb.m_continuity = np.mean(C)
+                emb.m_rnx = np.mean(R)
 
-            highdim_com_dists = np.take(D_highdim_feat, part_keys, axis=0)
-            highdim_com_dists = np.take(highdim_com_dists, part_keys, axis=1)
+            else:
+                k = fixed_k
+                Qs = Q[k:, :k]
+                W = np.arange(Qs.shape[0]).reshape(
+                    -1, 1
+                )  # a column vector of weights. weight = rank error = actual_rank - k
+                T = (
+                    1 - np.sum(Qs * W) / (k + 1) / m / (m - 1 - k)
+                )  # 1 - normalized hard-k-intrusions. lower-left region. weighted by rank error (rank - k)
 
-            lowdim_com_dists = np.take(D_lowdim, part_keys, axis=0)
-            lowdim_com_dists = np.take(lowdim_com_dists, part_keys, axis=1)
+                C = 1 - np.sum(Qs * W) / (k + 1) / m / (
+                    m - 1 - k
+                )  # 1 - normalized hard-k-extrusions. upper-right region
+                # R = ((m - 1) * QNN[k-1] - k) / (m - 1 - k)
+                R = (m * QNN[k - 1] - k) / (m - k)
 
-            highdim_com_dists = squareform(highdim_com_dists)
-            lowdim_com_dists = squareform(lowdim_com_dists)
+                emb.m_trustworthiness = T
+                emb.m_continuity = C
+                emb.m_rnx = R
 
-            kruskal_com += compute_kruskal_stress(highdim_com_dists, lowdim_com_dists)
+            global_rank_score_list = [
+                emb.m_trustworthiness,
+                emb.m_continuity,
+                emb.m_rnx,
+            ]
+            global_rank_score_nominator = np.sum(global_rank_score_list)
 
-        # normalize by number of communities
-        kruskal_com = kruskal_com / len(set(emb.com_partition.values()))
-        emb.m_kruskal_stress_community = kruskal_com
+            # avoid division by zero if all scores are zero (not computed)
+            if global_rank_score_nominator > 0.0:
+                # compute global rank score as the average of the non-zero (i. e. computed) scores
+                global_rank_score_denominator = len(
+                    [x for x in global_rank_score_list if x > 0.0]
+                )
+                emb.m_global_rank_score = (
+                    global_rank_score_nominator / global_rank_score_denominator
+                )
 
-        D_highdim_feat = squareform(D_highdim_feat)
-        D_lowdim = squareform(D_lowdim)
+            emb.coranking_matrix = cr_matrix
+            emb.m_q_local = Qlocal
 
-        emb.m_kruskal_stress = compute_kruskal_stress(D_highdim_feat, D_lowdim)
-        emb.m_shepard_spearman = metric_spearman(D_highdim_feat, D_lowdim)
+        if distance_metrics:
+            D_highdim_feat = processing.compute_pairwise_dists(
+                highdim_df, sim_features=target_features
+            )
+
+            kruskal_com = 0.0
+            for part in set(emb.com_partition.values()):
+                part_keys = [k for k, v in emb.com_partition.items() if v == part]
+
+                highdim_com_dists = np.take(D_highdim_feat, part_keys, axis=0)
+                highdim_com_dists = np.take(highdim_com_dists, part_keys, axis=1)
+
+                lowdim_com_dists = np.take(D_lowdim, part_keys, axis=0)
+                lowdim_com_dists = np.take(lowdim_com_dists, part_keys, axis=1)
+
+                highdim_com_dists = squareform(highdim_com_dists)
+                lowdim_com_dists = squareform(lowdim_com_dists)
+
+                kruskal_com += compute_kruskal_stress(
+                    highdim_com_dists, lowdim_com_dists
+                )
+
+            # normalize by number of communities
+            kruskal_com = kruskal_com / len(set(emb.com_partition.values()))
+            emb.m_kruskal_stress_community = kruskal_com
+
+            D_highdim_feat = squareform(D_highdim_feat)
+            D_lowdim = squareform(D_lowdim)
+
+            emb.m_kruskal_stress = compute_kruskal_stress(D_highdim_feat, D_lowdim)
+            emb.m_shepard_spearman = metric_spearman(D_highdim_feat, D_lowdim)
 
         emb.m_total_score = metric_total_score(emb)
 
@@ -357,13 +404,15 @@ def metrics_report(embeddings: list[EmbeddingObj]) -> pd.DataFrame:
         columns=[
             "marker",
             "m_total_score",
-            "metric_jaccard (size)",
+            # "metric_jaccard (size)",
             "m_q_local",
             "m_trustworthiness",
             "m_continuity",
             "m_shepard_spearman",
             "m_kruskal_stress",
             "m_kruskal_stress_community",
+            "m_rnx",
+            "m_global_rank_score",
         ]
     )
 
@@ -371,13 +420,15 @@ def metrics_report(embeddings: list[EmbeddingObj]) -> pd.DataFrame:
         df.loc[i] = [
             emb.obj_id,
             emb.m_total_score,
-            emb.m_jaccard.size,
+            # emb.m_jaccard.size,
             emb.m_q_local,
             emb.m_trustworthiness,
             emb.m_continuity,
             emb.m_shepard_spearman,
             emb.m_kruskal_stress,
             emb.m_kruskal_stress_community,
+            emb.m_rnx,
+            emb.m_global_rank_score,
         ]
 
     return df
