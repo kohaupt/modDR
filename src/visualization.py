@@ -46,9 +46,9 @@ def display_graphs(
         if i < len(results):
             graph = results[i].sim_graph.copy()
             positions = results[i].embedding.copy()
-            node_sizes = [30] * len(graph.nodes())
-            node_colors = ["blue"] * len(graph.nodes())
-            edge_colors = ["white"] * len(graph.edges())
+            node_sizes = [30] * len(positions)
+            node_colors = ["blue"] * len(positions)
+            edge_colors = ["white"] * len(positions)
 
             # add node labels (colors), if provided
             if results[i].labels is not None:
@@ -159,16 +159,75 @@ def plot_shepard_diagram(
 
 def plot_metrics_report(data: pd.DataFrame) -> None:
     df_melted = data.drop("metric_jaccard (size)", axis=1).melt(
-        id_vars="marker", var_name="Feature", value_name="Value"
+        id_vars="Modified Version", var_name="Metric", value_name="Score"
     )
     sb.set_style("whitegrid", {"axes.grid": False})
     ax = sb.lineplot(
         data=df_melted,
-        x="marker",
-        y="Value",
-        hue="Feature",
+        x="Modified Version",
+        y="Score",
+        hue="Metric",
         palette="muted",
         marker="o",
     )
 
     sb.move_legend(ax, "upper left", bbox_to_anchor=(1, 1))
+
+
+def plot_metrics_report_new(
+    data: pd.DataFrame, dual_axis_feature: str = "m_kruskal_stress"
+) -> None:
+    # Entferne das Jaccard-Merkmal
+    data_clean = data.drop("metric_jaccard (size)", axis=1)
+
+    data_clean = data_clean.melt(
+        id_vars="marker", var_name="Feature", value_name="Value"
+    )
+
+    # # Setze Marker-Spalte als Index
+    # data_clean = data_clean.set_index("marker")
+
+    # Trenne in primäre und sekundäre Features
+    primary_features = [col for col in data_clean.columns if col != dual_axis_feature]
+
+    fig, ax1 = plt.subplots(figsize=(10, 6))
+
+    # Plot für primäre Features
+    ax1.plot(
+        data_clean,
+        marker="o",
+        linewidth=2,
+    )
+
+    ax1.set_ylabel("Metrics Score", fontsize=12)
+    ax1.set_xlabel("Modified Version", fontsize=12)
+    ax1.tick_params(axis="y", labelcolor="black")
+    ax1.tick_params(axis="x", rotation=45)
+
+    # Sekundäre Y-Achse für das spezifizierte Feature
+    ax2 = ax1.twinx()
+    ax2.plot(
+        data_clean.index,
+        data_clean[dual_axis_feature],
+        label=dual_axis_feature,
+        marker="o",
+        linewidth=2,
+        linestyle="--",
+    )
+    ax2.set_ylabel(f"Metrics Score ({dual_axis_feature})", fontsize=12)
+    ax2.tick_params(axis="y", rotation=45)
+
+    # Legenden kombinieren
+    lines1, labels1 = ax1.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax1.legend(
+        lines1 + lines2,
+        labels1 + labels2,
+        loc="upper left",
+        bbox_to_anchor=(1, 1),
+        frameon=False,
+    )
+
+    plt.title("Metrics Report", fontsize=14, weight="bold")
+    plt.tight_layout()
+    plt.show()

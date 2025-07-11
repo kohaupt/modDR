@@ -10,7 +10,70 @@ from scipy.spatial.distance import pdist, squareform
 from sklearn.neighbors import kneighbors_graph  # type: ignore
 from sklearn.preprocessing import MinMaxScaler  # type: ignore
 
+import evaluation  # type: ignore
 from embedding_obj import EmbeddingObj  # type: ignore
+
+
+def dimension_reduction(
+    data: pd.DataFrame, method: str = "UMAP"
+) -> tuple[list[EmbeddingObj], int]:
+    """
+    1. Step of the modDR pipeline: Dimensionality Reduction.
+    """
+    embeddings = []
+
+    if method == "UMAP":
+        try:
+            import umap  # type: ignore
+        except ImportError as err:
+            raise ImportError(
+                "UMAP is not installed. Please install it via 'pip install umap-learn'."
+            ) from err
+
+        # set parameters for UMAP, add custom n-neighbors value depending on data size
+        params_n_neigbors_fixed = {10, 15, 20, 50, 100}
+        params_n_neigbors_data = {data.shape[0] / 80, data.shape[0] / 40}
+
+        params_n_neigbors = list(params_n_neigbors_fixed.union(params_n_neigbors_data))
+        param_min_dist = 1
+        random_state = 0
+
+        for current_n_neigbors in params_n_neigbors:
+            reducer = umap.UMAP(
+                n_neighbors=current_n_neigbors,
+                min_dist=param_min_dist,
+                random_state=random_state,
+            )
+            embedding = reducer.fit_transform(data)
+            embedding_dict = {i: embedding[i] for i in range(data.shape[0])}
+
+            emb = EmbeddingObj(
+                embedding=embedding_dict,
+                edge_weights=np.array([]),
+                graph=nx.Graph(reducer.graph_),
+                title=f"UMAP with n_neighbors: {current_n_neigbors}",
+            )
+
+            emb.k_neighbors = current_n_neigbors
+            embeddings.append(emb)
+    else:
+        raise ValueError(
+            f"Method '{method}' is not supported. Currently, only 'UMAP' is available."
+        )
+
+    embeddings = evaluation.compute_global_metrics(
+        data, embeddings, [], distance_metrics=False
+    )
+
+    recommended_embedding_idx = 0
+    for i in range(1, len(embeddings) - 1):
+        if (
+            embedding[recommended_embedding_idx].m_global_rank_score
+            > embedding[i].m_global_rank_score
+        ):
+            recommended_embedding_idx = i
+
+    return embeddings, recommended_embedding_idx
 
 
 def generate_pairwise_threshold_graphs(

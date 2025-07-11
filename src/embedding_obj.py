@@ -14,7 +14,9 @@ class EmbeddingObj:
     edge_weights: npt.NDArray[np.float32]
     title: Optional[str]
 
-    com_partition: Optional[dict[int,int]] = None
+    k_neighbors: int = 0
+
+    com_partition: Optional[dict[int, int]] = None
     partition_centers: Optional[dict[int, npt.NDArray[np.float32]]] = None
     labels: Optional[dict[int, float]] = None
 
@@ -26,19 +28,23 @@ class EmbeddingObj:
     m_shepard_spearman: float = 0.0
     m_kruskal_stress_community: float = 0.0
     m_kruskal_stress: float = 0.0
+    m_rnx: float = 0.0
+    m_global_rank_score: float = 0.0
     m_total_score: float = 0.0
 
-    def __init__(self,
-                 graph: nx.Graph,
-                 embedding: dict[int, npt.NDArray[np.float32]],
-                 edge_weights: npt.NDArray[np.float32],
-                 title: Optional[str] = None,
-                 obj_id: Optional[float] = None,
-                 labels: Optional[dict[int, float]] = None,
-                 partition_centers: Optional[dict[int, npt.NDArray[np.float32]]] = None) -> None:
+    def __init__(
+        self,
+        embedding: dict[int, npt.NDArray[np.float32]],
+        edge_weights: npt.NDArray[np.float32],
+        graph: Optional[nx.Graph] = None,
+        title: Optional[str] = None,
+        obj_id: Optional[float] = None,
+        labels: Optional[dict[int, float]] = None,
+        partition_centers: Optional[dict[int, npt.NDArray[np.float32]]] = None,
+    ) -> None:
         self.sim_graph = graph
         self.embedding = embedding
-        if len(edge_weights) == 0:
+        if graph is not None and len(edge_weights) == 0:
             self.edge_weights = self.get_edge_weights()
         else:
             self.edge_weights = edge_weights
@@ -54,14 +60,16 @@ class EmbeddingObj:
         self.partition_centers = partition_centers
 
     def __str__(self) -> str:
-        return ("---------------------------------------\n"
-                f"Embedding object (ID: {self.obj_id})\n"
-                f"Title: '{self.title}'\n"
-                f"Graph: {self.sim_graph}\n"
-                f"Embedding shape: {len(self.embedding.items())}\n"
-                f"Shape of edge weights: {self.edge_weights.shape}\n\n"
-                f"Total score: {self.m_total_score if self.m_total_score is not None else 'not computed'}\n"
-                "---------------------------------------")
+        return (
+            "---------------------------------------\n"
+            f"Embedding object (ID: {self.obj_id})\n"
+            f"Title: '{self.title}'\n"
+            f"Graph: {self.sim_graph}\n"
+            f"Embedding shape: {len(self.embedding.items())}\n"
+            f"Shape of edge weights: {self.edge_weights.shape}\n\n"
+            f"Total score: {self.m_total_score if self.m_total_score is not None else 'not computed'}\n"
+            "---------------------------------------"
+        )
 
     def get_edge_weights(self) -> npt.NDArray[np.float32]:
         edges = self.sim_graph.edges(data=True)
