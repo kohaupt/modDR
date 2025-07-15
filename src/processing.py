@@ -25,12 +25,24 @@ def run_pipeline(
     graph_method: str = "DR",
     community_resolutions: list[float] = None,
     layout_method: str = "KK",
+    boundary_neigbors: bool = False,
+    iterations: Optional[list[int]] = None,
     compute_metrics: bool = True,
     verbose: bool = False,
 ) -> list[EmbeddingObj]:
     """
     Run the modDR pipeline for dimensionality reduction and community detection.
     """
+
+    if verbose:
+        print("------------------------------------------------------------")
+        print("Start modDR pipeline with the following parameters:")
+        print(f"Dimensionality Reduction Method: {dr_method}")
+        print(f"Graph Construction Method: {graph_method}")
+        print(f"Community Detection Resolutions: {community_resolutions}")
+        print(f"Layout Method: {layout_method}")
+        start_time = time.time()
+
     # 1. Step: dimensionality reduction
     if dr_method == "UMAP":
         reference = dimensionality_reduction_umap(data, compute_metrics=False)
@@ -69,36 +81,57 @@ def run_pipeline(
             reference, resolution_parameter=resolution, verbose=verbose
         )
 
-        compute_modified_positions(
-            modified_embedding,
-            pairwise_dists=feat_sim,
-            layout_method=layout_method,
-            boundary_edges=False,
-            threshold=None,
+        if layout_method == "FR":
+            if iterations is None:
+                iterations = [10]
+
+            for iteration in iterations:
+                embeddings.append(
+                    compute_modified_positions(
+                        modified_embedding,
+                        layout_method=layout_method,
+                        layout_iterations=iteration,
+                        boundary_neigbors=boundary_neigbors,
+                        inplace=False,
+                        verbose=verbose,
+                    )
+                )
+        else:
+            embeddings.append(
+                compute_modified_positions(
+                    modified_embedding,
+                    pairwise_dists=feat_sim,
+                    layout_method=layout_method,
+                    layout_iterations=iterations,
+                    boundary_neigbors=boundary_neigbors,
+                    inplace=True,
+                    verbose=verbose,
+                )
+            )
+
+    if compute_metrics:
+        # 5.1 Step: compute global metrics
+        evaluation.compute_global_metrics(
+            data,
+            embeddings,
+            sim_features,
+            fixed_k=reference.k_neighbors,
             inplace=True,
             verbose=verbose,
         )
 
-        if compute_metrics:
-            # 5.1 Step: compute global metrics
-            evaluation.compute_global_metrics(
-                data,
-                [modified_embedding],
-                sim_features,
-                fixed_k=reference.k_neighbors,
-                inplace=True,
-                verbose=verbose,
-            )
+        # 5.2 Step: compute pairwise metrics
+        evaluation.compute_pairwise_metrics(
+            data,
+            embeddings,
+            inplace=True,
+            verbose=verbose,
+        )
 
-            # 5.2 Step: compute pairwise metrics
-            evaluation.compute_pairwise_metrics(
-                data,
-                [modified_embedding],
-                inplace=True,
-                verbose=verbose,
-            )
-
-        embeddings.append(modified_embedding)
+    if verbose:
+        end_time = time.time()
+        print(f"Pipeline finished after {end_time - start_time:.2f} seconds.")
+        print("------------------------------------------------------------")
 
     return embeddings
 
@@ -321,7 +354,7 @@ def compute_modified_positions(
     layout_method: str = "KK",
     layout_scale: int = 6,
     layout_iterations: int = 10,
-    boundary_edges: bool = False,
+    boundary_neigbors: bool = False,
     pairwise_dists: Optional[npt.NDArray[np.float32]] = None,
     inplace: bool = False,
     verbose: bool = False,
@@ -339,7 +372,7 @@ def compute_modified_positions(
         start_time = time.time()
 
     partition_subgraphs, partition_centers, partition_boundary_neighbors = (
-        compute_community_graphs(embedding, boundary_edges=boundary_edges)
+        compute_community_graphs(embedding, boundary_neigbors=boundary_neigbors)
     )
 
     embedding.partition_centers = partition_centers
@@ -350,7 +383,9 @@ def compute_modified_positions(
             partition_subgraphs,
             pairwise_dists,
             scale=layout_scale,
-            boundary_neigbors=partition_boundary_neighbors if boundary_edges else None,
+            boundary_neigbors=partition_boundary_neighbors
+            if boundary_neigbors
+            else None,
             inplace=True,
             verbose=verbose,
         )
@@ -360,7 +395,9 @@ def compute_modified_positions(
             partition_subgraphs,
             scale=layout_scale,
             iterations=layout_iterations,
-            boundary_neigbors=partition_boundary_neighbors if boundary_edges else None,
+            boundary_neigbors=partition_boundary_neighbors
+            if boundary_neigbors
+            else None,
             inplace=True,
             verbose=verbose,
         )
@@ -372,18 +409,18 @@ def compute_modified_positions(
     if verbose:
         end_time = time.time()
         print(
-            f"Computation of all new positions finished after {end_time - start_time:.2f} seconds."
+            f"Computation of new positions finished after {end_time - start_time:.2f} seconds."
         )
         print("------------------------------------------------------------")
 
-    if boundary_edges:
+    if boundary_neigbors:
         embedding.title += ", boundary edges added"
 
     return embedding
 
 
 def compute_community_graphs(
-    embedding: EmbeddingObj, boundary_edges: bool = False
+    embedding: EmbeddingObj, boundary_neigbors: bool = False
 ) -> tuple[dict[int, nx.Graph], dict[int, tuple[float, float]], dict[int, list[Any]]]:
     partition_subgraphs = {}
     partition_centers = {}
@@ -403,7 +440,7 @@ def compute_community_graphs(
             ]
         ).copy()
 
-        if boundary_edges:
+        if boundary_neigbors:
             subgraph, boundary_neighbors = add_boundary_edges(
                 embedding.sim_graph, subgraph
             )
@@ -437,8 +474,8 @@ def compute_kamada_kawai_layout(
     idx = {n: k for k, n in enumerate(node_list)}
 
     for part_key, part_graph in partition_subgraphs.items():
-        if verbose:
-            start_time = time.time()
+        # if verbose:
+        #     start_time = time.time()
 
         subgraph_pos = {node: embedding.embedding[node] for node in part_graph.nodes}
 
@@ -465,11 +502,11 @@ def compute_kamada_kawai_layout(
 
         embedding.embedding.update(subgraph_updated_pos)
 
-        if verbose:
-            end_time = time.time()
-            print(
-                f"Computation for partition {part_key} with {len(part_graph.nodes)} nodes finished after {end_time - start_time:.2f} seconds."
-            )
+        # if verbose:
+        #     end_time = time.time()
+        #     print(
+        #         f"Computation for partition {part_key} with {len(part_graph.nodes)} nodes finished after {end_time - start_time:.2f} seconds."
+        #     )
 
     return embedding
 
@@ -494,8 +531,8 @@ def compute_fruchterman_reingold_layout(
         print("Start computation with Fruchterman-Reingold-algorithm.")
 
     for part_key, part_graph in partition_subgraphs.items():
-        if verbose:
-            start_time = time.time()
+        # if verbose:
+        #     start_time = time.time()
 
         subgraph_pos = {node: embedding.embedding[node] for node in part_graph.nodes}
 
@@ -518,11 +555,11 @@ def compute_fruchterman_reingold_layout(
 
         embedding.embedding.update(subgraph_updated_pos)
 
-        if verbose:
-            end_time = time.time()
-            print(
-                f"Computation for partition {part_key} with {len(part_graph.nodes)} nodes finished after {end_time - start_time:.2f} seconds."
-            )
+        # if verbose:
+        #     end_time = time.time()
+        #     print(
+        #         f"Computation for partition {part_key} with {len(part_graph.nodes)} nodes finished after {end_time - start_time:.2f} seconds."
+        #     )
 
     return embedding
 

@@ -21,8 +21,8 @@ def display_graphs(
     results: list[EmbeddingObj],
     figsize_columns: int = 2,
     figsize: tuple[int, int] = (15, 15),
-    cmap: plt.cm = plt.cm.Accent,
-    edge_cmap: plt.cm = plt.cm.plasma,
+    cmap: plt.cm = plt.cm.viridis,
+    edge_cmap: plt.cm = plt.cm.viridis,
     show_cbar: bool = True,
     cbar_labels: Optional[list[str]] = None,
     show_edges: bool = True,
@@ -49,15 +49,19 @@ def display_graphs(
         if i < len(results):
             graph = results[i].sim_graph.copy()
             positions = results[i].embedding.copy()
-            node_sizes = [30] * graph.number_of_nodes()
+            node_sizes = [20] * graph.number_of_nodes()
             node_colors = ["blue"] * graph.number_of_nodes()
             edge_colors = ["white"] * graph.number_of_edges()
 
             # add node labels (colors), if provided
             if node_labels is not None:
                 node_colors = list(nx.get_node_attributes(graph, node_labels).values())
-            elif results[i].labels is not None:
-                node_colors = [results[i].labels[n] for n in graph.nodes()]
+
+            if len(node_colors) == 0:
+                if results[i].labels is not None:
+                    node_colors = [results[i].labels[n] for n in graph.nodes()]
+                else:
+                    node_colors = ["blue"] * graph.number_of_nodes()
 
             if show_edges:
                 edge_colors = results[i].edge_weights
@@ -106,9 +110,10 @@ def plot_community_graphs(
     results: list[EmbeddingObj],
     figsize_columns: int = 2,
     figsize: tuple[int, int] = (15, 15),
-    cmap: plt.cm = plt.cm.Accent,
-    edge_cmap: plt.cm = plt.cm.plasma,
+    cmap: plt.cm = plt.cm.viridis,
+    edge_cmap: plt.cm = plt.cm.viridis,
     show_partition_centers: bool = False,
+    only_communities: bool = False,
     node_labels: Optional[str] = None,
     community_ids: Optional[list[int]] = None,
     boundary_edges: bool = False,
@@ -120,25 +125,15 @@ def plot_community_graphs(
 
     for i in range(len(axs)):
         if i < len(results):
-            graph = nx.Graph()
-            graph.add_nodes_from(results[i].sim_graph.nodes(data=True))
-
-            positions = results[i].embedding.copy()
-            node_sizes = [30] * results[i].sim_graph.number_of_nodes()
-            node_colors = ["blue"] * results[i].sim_graph.number_of_nodes()
-            edge_colors = []
-
-            # add node labels (colors), if provided
-            if node_labels is not None:
-                node_colors = list(nx.get_node_attributes(graph, node_labels).values())
-            elif results[i].labels is not None:
-                node_colors = [results[i].labels[n] for n in graph.nodes()]
-
-            partition_subgraphs, _, partition_boundary_neighbors = (
-                processing.compute_community_graphs(
-                    results[i], boundary_edges=boundary_edges
-                )
+            partition_subgraphs, _, _ = processing.compute_community_graphs(
+                results[i], boundary_neigbors=boundary_edges
             )
+
+            graph = nx.Graph()
+            positions = {}
+            if not only_communities:
+                graph.add_nodes_from(results[i].sim_graph.nodes(data=True))
+                positions = results[i].embedding.copy()
 
             if community_ids is not None:
                 # Filter the subgraphs based on the specified community IDs
@@ -147,23 +142,31 @@ def plot_community_graphs(
                 }
 
                 for community_id in community_ids:
-                    graph.add_edges_from(
-                        partition_subgraphs[community_id].edges(data=True)
-                    )
-
                     for u, v in partition_subgraphs[community_id].edges():
-                        if (
-                            u in partition_boundary_neighbors[community_id]
-                            or v in partition_boundary_neighbors[community_id]
-                        ):
-                            edge_colors.append(-1)
-                        else:
-                            edge_colors.append(node_colors[u])
+                        graph.add_edge(u, v, community=community_id)
+                        if only_communities:
+                            graph.add_node(u, community=community_id)
+                            graph.add_node(v, community=community_id)
+                            positions[u] = results[i].embedding[u]
+                            positions[v] = results[i].embedding[v]
 
             else:
                 # Add all subgraphs to the main graph
                 for _, subgraph in partition_subgraphs.items():
-                    graph.add_edges_from(subgraph.edges(data=True))
+                    for u, v in subgraph.edges():
+                        graph.add_edge(u, v, community=community_id)
+
+            node_sizes = [30] * graph.number_of_nodes()
+            node_colors = ["blue"] * graph.number_of_nodes()
+            edge_colors = []
+
+            # add node labels (colors), if provided
+            if node_labels is not None:
+                node_colors = list(nx.get_node_attributes(graph, node_labels).values())
+            elif results[i].labels is not None:
+                node_colors = [results[i].labels[n] for n in graph.nodes()]
+
+            edge_colors = [d["community"] for u, v, d in graph.edges(data=True)]
 
             # add partition centers to the graph (with dedicated size, color and position)
             if show_partition_centers and results[i].partition_centers is not None:
@@ -186,8 +189,8 @@ def plot_community_graphs(
                 node_size=node_sizes,
                 node_color=node_colors,
                 edge_color=edge_colors,
-                edge_vmin=0,
-                edge_vmax=1,
+                # edge_vmin=min(edge_colors) if edge_colors else 0,
+                # edge_vmax=max(edge_colors) if edge_colors else 1,
                 width=0.4,
                 alpha=1.0,
                 edge_cmap=edge_cmap,
