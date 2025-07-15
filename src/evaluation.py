@@ -1,3 +1,4 @@
+import copy
 import time
 from typing import Optional
 
@@ -148,15 +149,22 @@ def compute_global_metrics(
     fixed_k: Optional[int] = None,
     ranking_metrics: bool = True,
     distance_metrics: bool = True,
+    inplace: bool = False,
+    verbose: bool = False,
 ) -> list[EmbeddingObj]:
+    if not inplace:
+        for i, emb in enumerate(embeddings):
+            embeddings[i] = copy.deepcopy(emb)
+
     # compute pairwise distances + ranking matrix for highdim data
     D_highdim = processing.compute_pairwise_dists(highdim_df)
     D_highdim_rank = [np.argsort(np.argsort(row)) for row in D_highdim]
 
     for emb in embeddings:
-        print("------------------------------------------------------------")
-        print("Computing global metrics for embedding with marker: ", emb.obj_id)
-        start_time = time.time()
+        if verbose:
+            print("------------------------------------------------------------")
+            print(f"Computing global metrics for embedding: `{emb.title}'.")
+            start_time = time.time()
 
         # compute pairwise distances + ranking matrix for lowdim data
         lowdim_df = pd.DataFrame(emb.embedding.values(), index=None)
@@ -254,26 +262,26 @@ def compute_global_metrics(
                 highdim_df, sim_features=target_features
             )
 
-            kruskal_com = 0.0
-            for part in set(emb.com_partition.values()):
-                part_keys = [k for k, v in emb.com_partition.items() if v == part]
+            # kruskal_com = 0.0
+            # for part in set(emb.com_partition.values()):
+            #     part_keys = [k for k, v in emb.com_partition.items() if v == part]
 
-                highdim_com_dists = np.take(D_highdim_feat, part_keys, axis=0)
-                highdim_com_dists = np.take(highdim_com_dists, part_keys, axis=1)
+            #     highdim_com_dists = np.take(D_highdim_feat, part_keys, axis=0)
+            #     highdim_com_dists = np.take(highdim_com_dists, part_keys, axis=1)
 
-                lowdim_com_dists = np.take(D_lowdim, part_keys, axis=0)
-                lowdim_com_dists = np.take(lowdim_com_dists, part_keys, axis=1)
+            #     lowdim_com_dists = np.take(D_lowdim, part_keys, axis=0)
+            #     lowdim_com_dists = np.take(lowdim_com_dists, part_keys, axis=1)
 
-                highdim_com_dists = squareform(highdim_com_dists)
-                lowdim_com_dists = squareform(lowdim_com_dists)
+            #     highdim_com_dists = squareform(highdim_com_dists)
+            #     lowdim_com_dists = squareform(lowdim_com_dists)
 
-                kruskal_com += compute_kruskal_stress(
-                    highdim_com_dists, lowdim_com_dists
-                )
+            #     kruskal_com += compute_kruskal_stress(
+            #         highdim_com_dists, lowdim_com_dists
+            #     )
 
-            # normalize by number of communities
-            kruskal_com = kruskal_com / len(set(emb.com_partition.values()))
-            emb.m_kruskal_stress_community = kruskal_com
+            # # normalize by number of communities
+            # kruskal_com = kruskal_com / len(set(emb.com_partition.values()))
+            # emb.m_kruskal_stress_community = kruskal_com
 
             D_highdim_feat = squareform(D_highdim_feat)
             D_lowdim = squareform(D_lowdim)
@@ -283,9 +291,11 @@ def compute_global_metrics(
 
         emb.m_total_score = metric_total_score(emb)
 
-        end_time = time.time()
-        print(f"Computation finished after {end_time - start_time:.2f} seconds")
-        print("------------------------------------------------------------")
+        if verbose:
+            end_time = time.time()
+            print(f"Computation finished after {end_time - start_time:.2f} seconds")
+            print("------------------------------------------------------------")
+
     return embeddings
 
 
@@ -293,19 +303,31 @@ def compute_global_metrics(
 
 
 def compute_pairwise_metrics(
-    highdim_data: npt.NDArray[np.float32], embeddings: list[EmbeddingObj]
+    highdim_data: npt.NDArray[np.float32],
+    embeddings: list[EmbeddingObj],
+    inplace: bool = False,
+    verbose: bool = False,
 ) -> list[EmbeddingObj]:
+    if not inplace:
+        for i in enumerate(embeddings):
+            embeddings[i] = copy.deepcopy(i)
+
     for emb in embeddings:
-        print("------------------------------------------------------------")
-        print("Computing pairwise metrics for embedding with marker: ", emb.obj_id)
-        start_time = time.time()
+        if verbose:
+            print("------------------------------------------------------------")
+            print(f"Computing global metrics for embedding: `{emb.title}'.")
+            start_time = time.time()
 
         emb.m_jaccard = compute_jaccard_distances(
-            highdim_data, np.array(list(emb.embedding.values())), nhood_size=7
+            highdim_data,
+            np.array(list(emb.embedding.values())),
+            nhood_size=emb.k_neighbors,
         )
-        end_time = time.time()
-        print(f"Computation finished after {end_time - start_time:.2f} seconds")
-        print("------------------------------------------------------------")
+
+        if verbose:
+            end_time = time.time()
+            print(f"Computation finished after {end_time - start_time:.2f} seconds")
+            print("------------------------------------------------------------")
 
     return embeddings
 
