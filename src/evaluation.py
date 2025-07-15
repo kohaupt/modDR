@@ -8,16 +8,22 @@ import pandas as pd
 from numpy.typing import ArrayLike
 from scipy.spatial.distance import squareform
 from scipy.stats import spearmanr
-from sklearn.neighbors import KDTree  # type: ignore
+from sklearn.neighbors import KDTree
 
 import processing
-from embedding_obj import EmbeddingObj  # type: ignore
+from embedding_obj import EmbeddingObj
 
 
 def compute_kruskal_stress(
     highdim_dists: npt.NDArray[np.float32], lowdim_dists: npt.NDArray[np.float32]
 ) -> float:
-    stress_numerator = np.sum((highdim_dists - lowdim_dists) ** 2)
+    numerator = np.dot(highdim_dists, lowdim_dists)
+    denominator = np.dot(lowdim_dists, lowdim_dists)
+    scaling_factor = numerator / denominator
+
+    lowdim_dists_scaled = lowdim_dists * scaling_factor
+
+    stress_numerator = np.sum((highdim_dists - lowdim_dists_scaled) ** 2)
     stress_denominator = np.sum(highdim_dists**2)
     return np.sqrt(stress_numerator / stress_denominator)
 
@@ -309,8 +315,8 @@ def compute_pairwise_metrics(
     verbose: bool = False,
 ) -> list[EmbeddingObj]:
     if not inplace:
-        for i in enumerate(embeddings):
-            embeddings[i] = copy.deepcopy(i)
+        for i, emb in enumerate(embeddings):
+            embeddings[i] = copy.deepcopy(emb)
 
     for emb in embeddings:
         if verbose:
