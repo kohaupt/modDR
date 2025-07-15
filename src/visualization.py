@@ -13,7 +13,8 @@ from scipy.spatial.distance import pdist
 from sklearn.isotonic import IsotonicRegression
 from sklearn.preprocessing import MinMaxScaler
 
-from embedding_obj import EmbeddingObj  # type: ignore
+import processing
+from embedding_obj import EmbeddingObj
 
 
 def display_graphs(
@@ -26,6 +27,7 @@ def display_graphs(
     cbar_labels: Optional[list[str]] = None,
     show_edges: bool = True,
     show_partition_centers: bool = False,
+    node_labels: Optional[str] = None,
 ) -> None:
     figsize_rows = math.ceil(len(results) / figsize_columns)
     fig, axs = plt.subplots(figsize_rows, figsize_columns, figsize=figsize)
@@ -47,12 +49,14 @@ def display_graphs(
         if i < len(results):
             graph = results[i].sim_graph.copy()
             positions = results[i].embedding.copy()
-            node_sizes = [30] * len(positions)
-            node_colors = ["blue"] * len(positions)
-            edge_colors = ["white"] * len(positions)
+            node_sizes = [30] * graph.number_of_nodes()
+            node_colors = ["blue"] * graph.number_of_nodes()
+            edge_colors = ["white"] * graph.number_of_edges()
 
             # add node labels (colors), if provided
-            if results[i].labels is not None:
+            if node_labels is not None:
+                node_colors = list(nx.get_node_attributes(graph, node_labels).values())
+            elif results[i].labels is not None:
                 node_colors = [results[i].labels[n] for n in graph.nodes()]
 
             if show_edges:
@@ -82,7 +86,7 @@ def display_graphs(
                 edge_vmin=0,
                 edge_vmax=1,
                 width=0.4,
-                alpha=0.7,
+                alpha=1.0,
                 edge_cmap=edge_cmap,
                 cmap=cmap,
             )
@@ -94,6 +98,104 @@ def display_graphs(
 
                 if cbar_labels is not None:
                     cbar.set_ticklabels(cbar_labels)
+        else:
+            fig.delaxes(axs[i])
+
+
+def plot_community_graphs(
+    results: list[EmbeddingObj],
+    figsize_columns: int = 2,
+    figsize: tuple[int, int] = (15, 15),
+    cmap: plt.cm = plt.cm.Accent,
+    edge_cmap: plt.cm = plt.cm.plasma,
+    show_partition_centers: bool = False,
+    node_labels: Optional[str] = None,
+    community_ids: Optional[list[int]] = None,
+    boundary_edges: bool = False,
+) -> None:
+    figsize_rows = math.ceil(len(results) / figsize_columns)
+    fig, axs = plt.subplots(figsize_rows, figsize_columns, figsize=figsize)
+
+    axs = [axs] if len(results) == 1 else axs.flatten()
+
+    for i in range(len(axs)):
+        if i < len(results):
+            graph = nx.Graph()
+            graph.add_nodes_from(results[i].sim_graph.nodes(data=True))
+
+            positions = results[i].embedding.copy()
+            node_sizes = [30] * results[i].sim_graph.number_of_nodes()
+            node_colors = ["blue"] * results[i].sim_graph.number_of_nodes()
+            edge_colors = []
+
+            # add node labels (colors), if provided
+            if node_labels is not None:
+                node_colors = list(nx.get_node_attributes(graph, node_labels).values())
+            elif results[i].labels is not None:
+                node_colors = [results[i].labels[n] for n in graph.nodes()]
+
+            partition_subgraphs, _, partition_boundary_neighbors = (
+                processing.compute_community_graphs(
+                    results[i], boundary_edges=boundary_edges
+                )
+            )
+
+            if community_ids is not None:
+                # Filter the subgraphs based on the specified community IDs
+                partition_subgraphs = {
+                    k: v for k, v in partition_subgraphs.items() if k in community_ids
+                }
+
+                for community_id in community_ids:
+                    graph.add_edges_from(
+                        partition_subgraphs[community_id].edges(data=True)
+                    )
+
+                    for u, v in partition_subgraphs[community_id].edges():
+                        if (
+                            u in partition_boundary_neighbors[community_id]
+                            or v in partition_boundary_neighbors[community_id]
+                        ):
+                            edge_colors.append(-1)
+                        else:
+                            edge_colors.append(node_colors[u])
+
+            else:
+                # Add all subgraphs to the main graph
+                for _, subgraph in partition_subgraphs.items():
+                    graph.add_edges_from(subgraph.edges(data=True))
+
+            # add partition centers to the graph (with dedicated size, color and position)
+            if show_partition_centers and results[i].partition_centers is not None:
+                start_idx = len(graph.nodes())
+                end_idx = len(graph.nodes()) + len(results[i].partition_centers)
+                node_idx = list(range(start_idx, end_idx))
+
+                graph.add_nodes_from(node_idx)
+
+                node_colors += [0] * len(results[i].partition_centers)
+                node_sizes += [120] * len(results[i].partition_centers)
+
+                center_dict = dict(zip(node_idx, results[i].partition_centers.values()))
+                positions.update(center_dict)
+
+            nx.draw(
+                graph,
+                ax=axs[i],
+                pos=positions,
+                node_size=node_sizes,
+                node_color=node_colors,
+                edge_color=edge_colors,
+                edge_vmin=0,
+                edge_vmax=1,
+                width=0.4,
+                alpha=1.0,
+                edge_cmap=edge_cmap,
+                cmap=cmap,
+            )
+
+            axs[i].set_title(results[i].title, fontsize=10)
+
         else:
             fig.delaxes(axs[i])
 
@@ -238,10 +340,31 @@ def plot_pos_movements(
     source: EmbeddingObj,
     target: EmbeddingObj,
     figsize: tuple[int, int] = (15, 15),
+    filtered_communities: Optional[list[int]] = None,
     community_colors: bool = False,
+    community_centers: bool = False,
 ) -> tuple[plt.Figure, plt.Axes]:
-    coords_source = np.array(list(source.embedding.values()))
-    coords_target = np.array(list(target.embedding.values()))
+    if filtered_communities is None:
+        coords_source = np.array(list(source.embedding.values()))
+        coords_target = np.array(list(target.embedding.values()))
+    else:
+        # Filter nodes based on the specified communities
+        filtered_node_ids = [
+            node
+            for node, community in target.sim_graph.nodes(data="community")
+            if community in filtered_communities
+        ]
+
+        # Filter embeddings to only include nodes from the specified communities
+        filtered_source_dict = {
+            node: source.embedding[node] for node in filtered_node_ids
+        }
+        filtered_target_dict = {
+            node: target.embedding[node] for node in filtered_node_ids
+        }
+
+        coords_source = np.array(list(filtered_source_dict.values()))
+        coords_target = np.array(list(filtered_target_dict.values()))
 
     u = coords_target[:, 0] - coords_source[:, 0]
     v = coords_target[:, 1] - coords_source[:, 1]
@@ -249,12 +372,21 @@ def plot_pos_movements(
     fig, ax = plt.subplots(figsize=figsize)
 
     if community_colors:
+        if filtered_communities is not None:
+            # Filter the community dictionary to only include the specified communities
+            community_dict = {
+                node: target.sim_graph.nodes[node]["community"]
+                for node in filtered_node_ids
+            }
+        else:
+            community_dict = nx.get_node_attributes(target.sim_graph, "community")
+
         plt.quiver(
             coords_source[:, 0],
             coords_source[:, 1],
             u,
             v,
-            list(target.com_partition.values()),
+            list(community_dict.values()),
             cmap="viridis",
             angles="xy",
             scale_units="xy",
@@ -278,14 +410,33 @@ def plot_pos_movements(
             alpha=0.5,
         )
 
+    if community_centers:
+        if filtered_communities is not None:
+            coords_community_centers = [
+                coords
+                for community, coords in target.partition_centers.items()
+                if community in filtered_communities
+            ]
+        else:
+            coords_community_centers = target.partition_centers.values()
+
+        coords_community_centers = np.array(coords_community_centers)
+
+        ax.scatter(
+            coords_community_centers[:, 0],
+            coords_community_centers[:, 1],
+            # c=list(set(community_dict.keys())) if community_colors else "black",
+        )
+
     all_x = np.concatenate([coords_source[:, 0], coords_target[:, 0]])
     all_y = np.concatenate([coords_source[:, 1], coords_target[:, 1]])
+    ax.set_xlim(all_x.min() - 0.5, all_x.max() + 0.5)
+    ax.set_ylim(all_y.min() - 0.5, all_y.max() + 0.5)
 
     ax.set_title(
         f"Position movements from '{source.title}' to '{target.title}'", fontsize=10
     )
-    ax.set_xlim(all_x.min() - 0.5, all_x.max() + 0.5)
-    ax.set_ylim(all_y.min() - 0.5, all_y.max() + 0.5)
+
     ax.set_axis_off()
     plt.tight_layout()
     plt.show()
