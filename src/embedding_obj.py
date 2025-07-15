@@ -16,7 +16,7 @@ class EmbeddingObj:
 
     k_neighbors: int = 0
 
-    com_partition: Optional[dict[int, int]] = None
+    com_partition: Optional[dict[int, list[int]]] = None
     partition_centers: Optional[dict[int, npt.NDArray[np.float32]]] = None
     labels: Optional[dict[int, float]] = None
 
