@@ -123,7 +123,11 @@ def plot_community_graphs(
     boundary_edges: bool = False,
 ) -> None:
     figsize_rows = math.ceil(len(results) / figsize_columns)
-    fig, axs = plt.subplots(figsize_rows, figsize_columns, figsize=figsize)
+    fig_width = figsize_columns * figsize[0]
+    fig_height = figsize_rows * figsize[1]
+    fig, axs = plt.subplots(
+        figsize_rows, figsize_columns, figsize=(fig_width, fig_height)
+    )
 
     axs = [axs] if len(results) == 1 else axs.flatten()
 
