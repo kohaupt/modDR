@@ -30,7 +30,11 @@ def display_graphs(
     node_labels: Optional[str] = None,
 ) -> None:
     figsize_rows = math.ceil(len(results) / figsize_columns)
-    fig, axs = plt.subplots(figsize_rows, figsize_columns, figsize=figsize)
+    fig_width = figsize_columns * figsize[0]
+    fig_height = figsize_rows * figsize[1]
+    fig, axs = plt.subplots(
+        figsize_rows, figsize_columns, figsize=(fig_width, fig_height)
+    )
 
     if show_cbar:
         if cbar_labels is None:
@@ -50,10 +54,10 @@ def display_graphs(
             graph = results[i].sim_graph.copy()
             positions = results[i].embedding.copy()
             node_sizes = [20] * graph.number_of_nodes()
-            node_colors = ["blue"] * graph.number_of_nodes()
             edge_colors = ["white"] * graph.number_of_edges()
 
             # add node labels (colors), if provided
+            node_colors = []
             if node_labels is not None:
                 node_colors = list(nx.get_node_attributes(graph, node_labels).values())
 
@@ -137,11 +141,24 @@ def plot_community_graphs(
 
             if community_ids is not None:
                 # Filter the subgraphs based on the specified community IDs
+                filtered_community_ids = [
+                    community_id
+                    for community_id in community_ids
+                    if community_id in partition_subgraphs
+                ]
+                if len(filtered_community_ids) != len(community_ids):
+                    print(
+                        f"Warning: Community IDs {set(community_ids) - set(filtered_community_ids)} "
+                        f"are not present in embedding '{results[i].title}'. Only plotting available communities."
+                    )
+
                 partition_subgraphs = {
-                    k: v for k, v in partition_subgraphs.items() if k in community_ids
+                    k: v
+                    for k, v in partition_subgraphs.items()
+                    if k in filtered_community_ids
                 }
 
-                for community_id in community_ids:
+                for community_id in filtered_community_ids:
                     for u, v in partition_subgraphs[community_id].edges():
                         graph.add_edge(u, v, community=community_id)
                         if only_communities:
@@ -154,7 +171,7 @@ def plot_community_graphs(
                 # Add all subgraphs to the main graph
                 for _, subgraph in partition_subgraphs.items():
                     for u, v in subgraph.edges():
-                        graph.add_edge(u, v, community=community_id)
+                        graph.add_edge(u, v, community=subgraph.edge[u, v]["community"])
 
             node_sizes = [30] * graph.number_of_nodes()
             node_colors = ["blue"] * graph.number_of_nodes()
@@ -414,14 +431,14 @@ def plot_pos_movements(
         )
 
     if community_centers:
-        if filtered_communities is not None:
+        if filtered_communities is None:
+            coords_community_centers = list(target.partition_centers.values())
+        else:
             coords_community_centers = [
                 coords
                 for community, coords in target.partition_centers.items()
                 if community in filtered_communities
             ]
-        else:
-            coords_community_centers = target.partition_centers.values()
 
         coords_community_centers = np.array(coords_community_centers)
 
