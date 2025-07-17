@@ -22,6 +22,7 @@ def run_pipeline(
     data: pd.DataFrame,
     sim_features: list[str],
     dr_method: str = "UMAP",
+    dr_param_n_neigbors: int = 15,
     graph_method: str = "DR",
     community_resolutions: list[float] = None,
     layout_method: str = "KK",
@@ -45,7 +46,9 @@ def run_pipeline(
 
     # 1. Step: dimensionality reduction
     if dr_method == "UMAP":
-        reference = dimensionality_reduction_umap(data, compute_metrics=False)
+        reference = dimensionality_reduction_umap(
+            data, n_neighbors=dr_param_n_neigbors, compute_metrics=False
+        )
     else:
         raise ValueError(
             f"Method '{dr_method}' is not supported. Currently, only 'UMAP' is available."
@@ -73,6 +76,10 @@ def run_pipeline(
     # 4. Step: community detection & position refinement
     if community_resolutions is None:
         community_resolutions = [0.01]
+
+    # set the community partition for the reference embedding to avoid errors
+    reference.com_partition = {0: np.arange(len(reference.embedding))}
+    nx.set_node_attributes(reference.sim_graph, 0, "community")
 
     embeddings = [reference]
 
@@ -204,7 +211,7 @@ def dimensionality_reduction_umap(
         embedding=embedding_dict,
         edge_weights=np.array([]),
         graph=nx.Graph(reducer.graph_),
-        title=f"UMAP with n_neighbors: {n_neighbors}",
+        title=f"UMAP (n_neigbors: {n_neighbors}, min_dist: {min_dist})",
     )
 
     umap_embedding.k_neighbors = n_neighbors
@@ -338,7 +345,7 @@ def com_detection_leiden(
             embedding.sim_graph.nodes[g_ig.vs[node]["_nx_name"]]["community"] = i
 
     embedding.com_partition = comm_dict
-    embedding.title = embedding.title + f" (Leiden, resolution: {resolution_parameter})"
+    embedding.title = embedding.title + f", Leiden (resolution: {resolution_parameter})"
 
     if verbose:
         end_time = time.time()
@@ -389,6 +396,8 @@ def compute_modified_positions(
             inplace=True,
             verbose=verbose,
         )
+
+        embedding.title += ", KK layouting"
     elif layout_method == "FR":
         compute_fruchterman_reingold_layout(
             embedding,
@@ -401,6 +410,9 @@ def compute_modified_positions(
             inplace=True,
             verbose=verbose,
         )
+
+        embedding.title += f", FR layouting (iterations: {layout_iterations})"
+
     else:
         raise ValueError(
             f"Layout method '{layout_method}' is not supported. Currently, only 'KK' (Kamada Kawai) and 'FR' (Fruchterman-Reingold) are available."
@@ -540,7 +552,9 @@ def compute_fruchterman_reingold_layout(
             part_graph,
             pos=subgraph_pos,
             iterations=iterations,
-            fixed=boundary_neigbors[part_key] if boundary_neigbors else None,
+            fixed=boundary_neigbors[part_key]
+            if boundary_neigbors is not None and len(boundary_neigbors[part_key]) > 0
+            else None,
             threshold=0.0001,
             weight="weight",
             center=embedding.partition_centers[part_key],
