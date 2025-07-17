@@ -10,7 +10,9 @@ import pandas as pd
 import umap
 from community import community_louvain
 from igraph import Graph
+from scipy.spatial import procrustes
 from scipy.spatial.distance import pdist, squareform
+from sklearn.manifold import MDS
 from sklearn.neighbors import kneighbors_graph
 from sklearn.preprocessing import MinMaxScaler
 
@@ -63,6 +65,15 @@ def run_pipeline(
     if layout_method == "FR":
         feat_sim = compute_pairwise_dists(
             data, invert=True, sim_features=sim_features, normalize=True
+        )
+
+    if layout_method == "MDS":
+        feat_sim = compute_pairwise_dists(
+            data,
+            invert=False,
+            sim_features=sim_features,
+            normalize=False,
+            apply_squareform=True,
         )
 
     # 3. Step: graph construction
@@ -398,6 +409,7 @@ def compute_modified_positions(
         )
 
         embedding.title += ", KK layouting"
+
     elif layout_method == "FR":
         compute_fruchterman_reingold_layout(
             embedding,
@@ -413,6 +425,16 @@ def compute_modified_positions(
 
         embedding.title += f", FR layouting (iterations: {layout_iterations})"
 
+    elif layout_method == "MDS":
+        compute_mds_layout(
+            embedding,
+            partition_subgraphs,
+            pairwise_dists,
+            inplace=True,
+            verbose=verbose,
+        )
+
+        embedding.title += ", MDS"
     else:
         raise ValueError(
             f"Layout method '{layout_method}' is not supported. Currently, only 'KK' (Kamada Kawai) and 'FR' (Fruchterman-Reingold) are available."
@@ -574,6 +596,97 @@ def compute_fruchterman_reingold_layout(
         #     print(
         #         f"Computation for partition {part_key} with {len(part_graph.nodes)} nodes finished after {end_time - start_time:.2f} seconds."
         #     )
+
+    return embedding
+
+
+def compute_mds_layout(
+    embedding: EmbeddingObj,
+    partition_subgraphs: dict[int, nx.Graph],
+    pairwise_dists: npt.NDArray[np.float32],
+    inplace: bool = False,
+    verbose: bool = False,
+) -> EmbeddingObj:
+    """
+    4.3 Step of the modDR pipeline: Execute position-movement via Kamada Kawai-layouting.
+    """
+
+    if not inplace:
+        embedding = copy.deepcopy(embedding)
+
+    if verbose:
+        print("Start computation with MDS-algorithm.")
+
+    original_pos_dict = embedding.embedding.copy()
+    updated_pos_dict = {}
+
+    for part_key, part_graph in partition_subgraphs.items():
+        # if verbose:
+        #     start_time = time.time()
+
+        if len(part_graph.nodes) == 1:
+            print(
+                f"INFO: Skipping partition {part_key} with only {len(part_graph.nodes)} node(s) for MDS layouting."
+            )
+            skipped_node_index = embedding.com_partition[part_key][0]
+            updated_pos_dict[skipped_node_index] = original_pos_dict[skipped_node_index]
+            continue
+
+        subgraph_pos = {
+            node: original_pos_dict[node] for node in embedding.com_partition[part_key]
+        }
+
+        subdist = pairwise_dists[
+            np.ix_(list(subgraph_pos.keys()), list(subgraph_pos.keys()))
+        ]
+
+        mds = MDS(
+            n_components=2,
+            dissimilarity="precomputed",
+            metric=True,
+            normalized_stress="auto",
+            max_iter=1000,
+            eps=1e-9,
+            n_init=1,
+        )
+
+        new_pos = mds.fit(
+            subdist, init=np.array(list(subgraph_pos.values()))
+        ).embedding_
+
+        updated_pos_dict.update(
+            {node: new_pos[i] for i, node in enumerate(subgraph_pos.keys())}
+        )
+
+    # subgraph_dists = pdist(list(subgraph_pos.values()), metric="euclidean")
+    # subgraph_dists_updated = pdist(subgraph_updated_pos, metric="euclidean")
+    # numerator = np.dot(subgraph_dists, subgraph_dists_updated)
+    # denominator = np.dot(subgraph_dists_updated, subgraph_dists_updated)
+    # scaling_factor = numerator / denominator
+
+    # subgraph_updated_pos *= scaling_factor
+
+    sorted_old_pos = dict(sorted(original_pos_dict.items()))
+    sorted_new_pos = dict(sorted(updated_pos_dict.items()))
+
+    mtx1, mtx2, disparity = procrustes(
+        np.array(list(sorted_old_pos.values())), np.array(list(sorted_new_pos.values()))
+    )
+
+    t = 10.5
+    updated_pos_dict = {
+        # node: (sorted_old_pos[i] + t * mtx2[i])
+        node: mtx2[i]
+        for i, node in enumerate(sorted_new_pos.keys())
+    }
+
+    embedding.embedding = updated_pos_dict
+
+    # if verbose:
+    #     end_time = time.time()
+    #     print(
+    #         f"Computation for partition {part_key} with {len(part_graph.nodes)} nodes finished after {end_time - start_time:.2f} seconds."
+    #     )
 
     return embedding
 
