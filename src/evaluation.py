@@ -268,26 +268,32 @@ def compute_global_metrics(
                 highdim_df, sim_features=target_features
             )
 
-            # kruskal_com = 0.0
-            # for part in set(emb.com_partition.values()):
-            #     part_keys = [k for k, v in emb.com_partition.items() if v == part]
+            if emb.com_partition is None:
+                # if no communities are defined, use the whole embedding as one community
+                emb.com_partition = {0: np.arange(len(emb.embedding))}
 
-            #     highdim_com_dists = np.take(D_highdim_feat, part_keys, axis=0)
-            #     highdim_com_dists = np.take(highdim_com_dists, part_keys, axis=1)
+            kruskal_com = 0.0
+            for part_nodes in list(emb.com_partition.values()):
+                if len(part_nodes) < 2:
+                    # skip communities with less than 2 nodes
+                    continue
 
-            #     lowdim_com_dists = np.take(D_lowdim, part_keys, axis=0)
-            #     lowdim_com_dists = np.take(lowdim_com_dists, part_keys, axis=1)
+                highdim_com_dists = np.take(D_highdim_feat, part_nodes, axis=0)
+                highdim_com_dists = np.take(highdim_com_dists, part_nodes, axis=1)
 
-            #     highdim_com_dists = squareform(highdim_com_dists)
-            #     lowdim_com_dists = squareform(lowdim_com_dists)
+                lowdim_com_dists = np.take(D_lowdim, part_nodes, axis=0)
+                lowdim_com_dists = np.take(lowdim_com_dists, part_nodes, axis=1)
 
-            #     kruskal_com += compute_kruskal_stress(
-            #         highdim_com_dists, lowdim_com_dists
-            #     )
+                highdim_com_dists = squareform(highdim_com_dists)
+                lowdim_com_dists = squareform(lowdim_com_dists)
 
-            # # normalize by number of communities
-            # kruskal_com = kruskal_com / len(set(emb.com_partition.values()))
-            # emb.m_kruskal_stress_community = kruskal_com
+                kruskal_com += compute_kruskal_stress(
+                    highdim_com_dists, lowdim_com_dists
+                )
+
+            # normalize by number of communities
+            kruskal_com = kruskal_com / len(emb.com_partition)
+            emb.m_kruskal_stress_community = kruskal_com
 
             D_highdim_feat = squareform(D_highdim_feat)
             D_lowdim = squareform(D_lowdim)
