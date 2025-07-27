@@ -17,15 +17,48 @@ from embedding_obj import EmbeddingObj
 def compute_kruskal_stress(
     highdim_dists: npt.NDArray[np.float32], lowdim_dists: npt.NDArray[np.float32]
 ) -> float:
-    numerator = np.dot(highdim_dists, lowdim_dists)
-    denominator = np.dot(lowdim_dists, lowdim_dists)
-    scaling_factor = numerator / denominator
+    # warnings.filterwarnings("error")
+    if not highdim_dists.any():
+        print("WARNING: Highdim distances are all 0. Returning *absolute* stress.")
+        stress_numerator = np.sum((highdim_dists - lowdim_dists) ** 2)
+        return np.sqrt(stress_numerator)
+
+    scaling_factor = processing.compute_distance_scaling(highdim_dists, lowdim_dists)
 
     lowdim_dists_scaled = lowdim_dists * scaling_factor
 
     stress_numerator = np.sum((highdim_dists - lowdim_dists_scaled) ** 2)
     stress_denominator = np.sum(highdim_dists**2)
+
     return np.sqrt(stress_numerator / stress_denominator)
+
+
+def compute_kruskal_stress_community(
+    highdim_dists: npt.NDArray[np.float32],
+    lowdim_dists: npt.NDArray[np.float32],
+    com_partition: dict[int, npt.NDArray[np.int32]],
+) -> float:
+    kruskal_com = 0.0
+    community_count = 0
+    for part_nodes in list(com_partition.values()):
+        if len(part_nodes) < 2:
+            # skip communities with less than 2 nodes
+            continue
+
+        highdim_com_dists = np.take(highdim_dists, part_nodes, axis=0)
+        highdim_com_dists = np.take(highdim_com_dists, part_nodes, axis=1)
+
+        lowdim_com_dists = np.take(lowdim_dists, part_nodes, axis=0)
+        lowdim_com_dists = np.take(lowdim_com_dists, part_nodes, axis=1)
+
+        highdim_com_dists = squareform(highdim_com_dists)
+        lowdim_com_dists = squareform(lowdim_com_dists)
+
+        kruskal_com += compute_kruskal_stress(highdim_com_dists, lowdim_com_dists)
+        community_count += 1
+
+    # normalize by number of communities
+    return kruskal_com / community_count
 
 
 def metric_spearman(
@@ -86,7 +119,7 @@ def _nhood_compare(
 def _nhood_search(
     highd_data: ArrayLike, nhood_size: int
 ) -> tuple[npt.NDArray[np.float32], ArrayLike]:
-    dmat = processing.compute_pairwise_dists(highd_data, normalize=False)
+    dmat = processing.compute_pairwise_dists(highd_data)
     indices = np.argpartition(dmat, nhood_size)[:, :nhood_size]
     dmat_shortened = submatrix(dmat, indices, nhood_size)
 
@@ -111,7 +144,7 @@ def compute_jaccard_distances(
 
 
 def _nhood_search_unlimited(data: ArrayLike) -> npt.NDArray[np.float32]:
-    dmat = processing.compute_pairwise_dists(data, normalize=False)
+    dmat = processing.compute_pairwise_dists(data)
     indices_sorted = np.argsort(dmat)
     # dists = dmat[indices_sorted]
 
@@ -165,6 +198,12 @@ def compute_global_metrics(
     # compute pairwise distances + ranking matrix for highdim data
     D_highdim = processing.compute_pairwise_dists(highdim_df)
     D_highdim_rank = [np.argsort(np.argsort(row)) for row in D_highdim]
+
+    # compute pairwise distances for reference data to compute differences in community-stress.
+    # Assuming that the reference data is the same for all embeddings and is given by the first embedding.
+    if distance_metrics:
+        reference_df = pd.DataFrame(embeddings[0].embedding.values(), index=None)
+        reference_lowdim = processing.compute_pairwise_dists(reference_df)
 
     for emb in embeddings:
         if verbose:
@@ -264,36 +303,25 @@ def compute_global_metrics(
             emb.m_q_local = Qlocal
 
         if distance_metrics:
-            D_highdim_feat = processing.compute_pairwise_dists(
-                highdim_df, sim_features=target_features
-            )
-
             if emb.com_partition is None:
                 # if no communities are defined, use the whole embedding as one community
                 emb.com_partition = {0: np.arange(len(emb.embedding))}
 
-            kruskal_com = 0.0
-            for part_nodes in list(emb.com_partition.values()):
-                if len(part_nodes) < 2:
-                    # skip communities with less than 2 nodes
-                    continue
+            D_highdim_feat = processing.compute_pairwise_dists(
+                highdim_df, sim_features=target_features, invert=False
+            )
 
-                highdim_com_dists = np.take(D_highdim_feat, part_nodes, axis=0)
-                highdim_com_dists = np.take(highdim_com_dists, part_nodes, axis=1)
+            emb.m_kruskal_stress_community = compute_kruskal_stress_community(
+                D_highdim_feat, D_lowdim, emb.com_partition
+            )
 
-                lowdim_com_dists = np.take(D_lowdim, part_nodes, axis=0)
-                lowdim_com_dists = np.take(lowdim_com_dists, part_nodes, axis=1)
-
-                highdim_com_dists = squareform(highdim_com_dists)
-                lowdim_com_dists = squareform(lowdim_com_dists)
-
-                kruskal_com += compute_kruskal_stress(
-                    highdim_com_dists, lowdim_com_dists
-                )
-
-            # normalize by number of communities
-            kruskal_com = kruskal_com / len(emb.com_partition)
-            emb.m_kruskal_stress_community = kruskal_com
+            # compute differences in community-stress
+            reference_com_stress = compute_kruskal_stress_community(
+                D_highdim_feat, reference_lowdim, emb.com_partition
+            )
+            emb.m_kruskal_stress_comm_diff = (
+                emb.m_kruskal_stress_community - reference_com_stress
+            )
 
             D_highdim_feat = squareform(D_highdim_feat)
             D_lowdim = squareform(D_lowdim)
@@ -423,9 +451,10 @@ def metric_total_score(
     m_t = embedding_obj.m_trustworthiness
     m_c = embedding_obj.m_continuity
     m_ks = 1 - embedding_obj.m_kruskal_stress
-    m_s = embedding_obj.m_shepard_spearman
+    m_rnx = embedding_obj.m_rnx
+    # m_s = embedding_obj.m_shepard_spearman
 
-    metrics_list = [m_ql, m_t, m_c, m_ks, m_s]
+    metrics_list = [m_ql, m_t, m_c, m_ks, m_rnx]
     m_total = 0
     for i in range(n_metrics):
         m_total += weights[i] * metrics_list[i]
@@ -445,6 +474,7 @@ def metrics_report(embeddings: list[EmbeddingObj]) -> pd.DataFrame:
             "m_shepard_spearman",
             "m_kruskal_stress",
             "m_kruskal_stress_community",
+            "m_kruskal_stress_comm_diff",
             "m_rnx",
             "m_global_rank_score",
         ]
@@ -461,6 +491,7 @@ def metrics_report(embeddings: list[EmbeddingObj]) -> pd.DataFrame:
             emb.m_shepard_spearman,
             emb.m_kruskal_stress,
             emb.m_kruskal_stress_community,
+            emb.m_kruskal_stress_comm_diff,
             emb.m_rnx,
             emb.m_global_rank_score,
         ]

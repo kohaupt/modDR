@@ -27,6 +27,7 @@ class EmbeddingObj:
     m_continuity: float = 0.0
     m_shepard_spearman: float = 0.0
     m_kruskal_stress_community: float = 0.0
+    m_kruskal_stress_comm_diff: float = 0.0
     m_kruskal_stress: float = 0.0
     m_rnx: float = 0.0
     m_global_rank_score: float = 0.0
