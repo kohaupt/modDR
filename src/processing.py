@@ -27,6 +27,7 @@ def run_pipeline(
     dr_param_n_neigbors: int = 15,
     graph_method: str = "DR",
     community_resolutions: list[float] = None,
+    community_resolution_amount: int = 3,
     layout_method: str = "KK",
     boundary_neigbors: bool = False,
     iterations: Optional[list[int]] = None,
@@ -58,13 +59,11 @@ def run_pipeline(
 
     # 2. Step: feature similarity computation
     if layout_method == "KK":
-        feat_sim = compute_pairwise_dists(
-            data, invert=False, sim_features=sim_features, normalize=False
-        )
+        feat_sim = compute_pairwise_dists(data, invert=False, sim_features=sim_features)
 
     if layout_method == "FR":
         feat_sim = compute_pairwise_dists(
-            data, invert=True, sim_features=sim_features, normalize=True
+            data, invert=True, normalize=True, sim_features=sim_features
         )
 
     if layout_method == "MDS":
@@ -72,7 +71,6 @@ def run_pipeline(
             data,
             invert=False,
             sim_features=sim_features,
-            normalize=False,
             apply_squareform=True,
         )
 
@@ -85,8 +83,29 @@ def run_pipeline(
     assign_graph_edge_weights(reference, feat_sim, inplace=True, verbose=verbose)
 
     # 4. Step: community detection & position refinement
+    weights = [d["weight"] for _, _, d in reference.sim_graph.edges(data=True)]
+    min_w, max_w = min(weights), max(weights)
+
     if community_resolutions is None:
-        community_resolutions = [0.01]
+        community_resolutions = np.linspace(
+            start=min_w, stop=max_w, num=community_resolution_amount
+        ).tolist()
+
+        range_w = max_w - min_w
+        padding = range_w * 0.05
+
+        community_resolutions[0] = min_w + padding
+        community_resolutions[-1] = max_w - padding
+
+        if verbose:
+            print(
+                f"Using the following community resolutions: {community_resolutions} (min: {min_w}, max: {max_w})."
+            )
+
+    if min_w > min(community_resolutions) or max_w < max(community_resolutions):
+        print(
+            f"WARNING: The resolution parameter(s) may be outside the recommended range ({min_w}, {max_w}). The resulting communities may not be meaningful."
+        )
 
     # set the community partition for the reference embedding to avoid errors
     reference.com_partition = {0: np.arange(len(reference.embedding))}
@@ -118,7 +137,7 @@ def run_pipeline(
             embeddings.append(
                 compute_modified_positions(
                     modified_embedding,
-                    pairwise_dists=feat_sim,
+                    target_dists=feat_sim,
                     layout_method=layout_method,
                     layout_iterations=iterations,
                     boundary_neigbors=boundary_neigbors,
@@ -237,9 +256,9 @@ def dimensionality_reduction_umap(
 
 def compute_pairwise_dists(
     df: pd.DataFrame,
-    normalize: bool = True,
     apply_squareform: bool = True,
     invert: bool = False,
+    normalize: bool = False,
     no_null: bool = False,
     sim_features: Optional[list[str]] = None,
 ) -> npt.NDArray[np.float32]:
@@ -256,13 +275,12 @@ def compute_pairwise_dists(
     distances = pdist(input_data, metric="euclidean")
 
     if normalize:
-        distances = MinMaxScaler().fit_transform(distances.reshape(-1, 1)).flatten()
+        distances = (
+            MinMaxScaler((0, 1)).fit_transform(distances.reshape(-1, 1)).flatten()
+        )
 
     if no_null:
         distances = np.where(distances == 0, 1e-9, distances)
-
-    if apply_squareform:
-        distances = squareform(distances)
 
     if invert and normalize:
         print(
@@ -270,12 +288,15 @@ def compute_pairwise_dists(
         )
         distances = 1 - distances
 
-    # TODO: check if this case is needed and prevent division by zero
     if invert and not normalize:
         print(
             "INFO: Inverting distances via 1 / distances, as no normalization is applied."
         )
+        distances = np.where(distances == 0, 1e-9, distances)
         distances = 1 / distances
+
+    if apply_squareform:
+        distances = squareform(distances)
 
     return distances.astype(np.float32)
 
@@ -348,7 +369,6 @@ def com_detection_leiden(
 
     comm_dict = {}
 
-    # Zeige Ergebnis: Clusternummern der Original-Nodes
     for i, community in enumerate(partition):
         comm_dict[i] = community
 
@@ -370,10 +390,10 @@ def com_detection_leiden(
 def compute_modified_positions(
     embedding: EmbeddingObj,
     layout_method: str = "KK",
-    layout_scale: int = 6,
+    layout_scale: int = 1,
     layout_iterations: int = 10,
     boundary_neigbors: bool = False,
-    pairwise_dists: Optional[npt.NDArray[np.float32]] = None,
+    target_dists: Optional[npt.NDArray[np.float32]] = None,
     inplace: bool = False,
     verbose: bool = False,
 ) -> EmbeddingObj:
@@ -396,11 +416,27 @@ def compute_modified_positions(
     embedding.partition_centers = partition_centers
 
     if layout_method == "KK":
+        if target_dists is None:
+            raise ValueError(
+                "Pairwise distances must be provided for Kamada Kawai layouting."
+            )
+
+        embedding_df = pd.DataFrame(embedding.embedding.values(), index=None)
+        embedding_dists = compute_pairwise_dists(
+            embedding_df,
+            apply_squareform=False,
+        )
+
+        target_scaling = compute_distance_scaling(
+            embedding_dists, squareform(target_dists)
+        )
+        target_dists = target_dists * target_scaling
+
         compute_kamada_kawai_layout(
             embedding,
             partition_subgraphs,
-            pairwise_dists,
-            scale=layout_scale,
+            target_dists,
+            scale=5,
             boundary_neigbors=partition_boundary_neighbors
             if boundary_neigbors
             else None,
@@ -409,6 +445,20 @@ def compute_modified_positions(
         )
 
         embedding.title += ", KK layouting"
+
+    elif layout_method == "MDS":
+        if target_dists is None:
+            raise ValueError("Pairwise distances must be provided for MDS layouting.")
+
+        compute_mds_layout(
+            embedding,
+            partition_subgraphs,
+            target_dists,
+            inplace=True,
+            verbose=verbose,
+        )
+
+        embedding.title += ", MDS"
 
     elif layout_method == "FR":
         compute_fruchterman_reingold_layout(
@@ -424,17 +474,6 @@ def compute_modified_positions(
         )
 
         embedding.title += f", FR layouting (iterations: {layout_iterations})"
-
-    elif layout_method == "MDS":
-        compute_mds_layout(
-            embedding,
-            partition_subgraphs,
-            pairwise_dists,
-            inplace=True,
-            verbose=verbose,
-        )
-
-        embedding.title += ", MDS"
     else:
         raise ValueError(
             f"Layout method '{layout_method}' is not supported. Currently, only 'KK' (Kamada Kawai) and 'FR' (Fruchterman-Reingold) are available."
@@ -451,6 +490,18 @@ def compute_modified_positions(
         embedding.title += ", boundary edges added"
 
     return embedding
+
+
+def compute_distance_scaling(
+    highdim_dists: npt.NDArray[np.float32], lowdim_dists: npt.NDArray[np.float32]
+) -> float:
+    if not highdim_dists.any():
+        print("WARNING: Highdim distances are all 0. Returning 1 as scaling factor.")
+        return 1.0
+
+    numerator = np.dot(highdim_dists, lowdim_dists)
+    denominator = np.dot(lowdim_dists, lowdim_dists)
+    return numerator / denominator
 
 
 def compute_community_graphs(
@@ -581,7 +632,7 @@ def compute_fruchterman_reingold_layout(
             weight="weight",
             center=embedding.partition_centers[part_key],
             scale=scale,
-            k=5.0,
+            k=1.0,
             seed=0,
         )
 
