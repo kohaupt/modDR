@@ -27,6 +27,7 @@ def display_graphs(
     cbar_labels: Optional[list[str]] = None,
     show_edges: bool = True,
     show_partition_centers: bool = False,
+    node_colors: Optional[str] = None,
     node_labels: Optional[str] = None,
 ) -> None:
     figsize_rows = math.ceil(len(results) / figsize_columns)
@@ -57,15 +58,17 @@ def display_graphs(
             edge_colors = ["white"] * graph.number_of_edges()
 
             # add node labels (colors), if provided
-            node_colors = []
-            if node_labels is not None:
-                node_colors = list(nx.get_node_attributes(graph, node_labels).values())
+            node_color_list = []
+            if node_colors is not None:
+                node_color_list = list(
+                    nx.get_node_attributes(graph, node_colors).values()
+                )
 
-            if len(node_colors) == 0:
+            if len(node_color_list) == 0:
                 if results[i].labels is not None:
-                    node_colors = [results[i].labels[n] for n in graph.nodes()]
+                    node_color_list = [results[i].labels[n] for n in graph.nodes()]
                 else:
-                    node_colors = ["blue"] * graph.number_of_nodes()
+                    node_color_list = ["blue"] * graph.number_of_nodes()
 
             if show_edges:
                 edge_colors = results[i].edge_weights
@@ -89,7 +92,7 @@ def display_graphs(
                 ax=axs[i],
                 pos=positions,
                 node_size=node_sizes,
-                node_color=node_colors,
+                node_color=node_color_list,
                 edge_color=edge_colors,
                 edge_vmin=0,
                 edge_vmax=1,
@@ -100,6 +103,17 @@ def display_graphs(
             )
 
             axs[i].set_title(results[i].title, fontsize=10)
+
+            if node_labels is not None:
+                nx.draw_networkx_labels(
+                    graph,
+                    positions,
+                    nx.get_node_attributes(graph, node_labels),
+                    font_size=12,
+                    horizontalalignment="left",
+                    verticalalignment="bottom",
+                    ax=axs[i],
+                )
 
             if show_cbar:
                 cbar = fig.colorbar(sm, ax=axs[i], shrink=0.8)
@@ -163,19 +177,15 @@ def plot_community_graphs(
                 }
 
                 for community_id in filtered_community_ids:
-                    for u, v in partition_subgraphs[community_id].edges():
-                        graph.add_edge(u, v, community=community_id)
-                        if only_communities:
-                            graph.add_node(u, community=community_id)
-                            graph.add_node(v, community=community_id)
-                            positions[u] = results[i].embedding[u]
-                            positions[v] = results[i].embedding[v]
+                    graph = nx.compose(graph, partition_subgraphs[community_id])
+                    if only_communities:
+                        for node in partition_subgraphs[community_id].nodes():
+                            positions[node] = results[i].embedding[node]
 
             else:
                 # Add all subgraphs to the main graph
                 for _, subgraph in partition_subgraphs.items():
-                    for u, v in subgraph.edges():
-                        graph.add_edge(u, v, community=subgraph.edge[u, v]["community"])
+                    graph = nx.compose(graph, subgraph)
 
             node_sizes = [30] * graph.number_of_nodes()
             node_colors = ["blue"] * graph.number_of_nodes()
@@ -187,7 +197,7 @@ def plot_community_graphs(
             elif results[i].labels is not None:
                 node_colors = [results[i].labels[n] for n in graph.nodes()]
 
-            edge_colors = [d["community"] for u, v, d in graph.edges(data=True)]
+            edge_colors = [graph.nodes[u]["community"] for u, v in graph.edges()]
 
             # add partition centers to the graph (with dedicated size, color and position)
             if show_partition_centers and results[i].partition_centers is not None:
