@@ -378,9 +378,12 @@ def plot_pos_movements(
     community_colors: bool = False,
     community_centers: bool = False,
 ) -> tuple[plt.Figure, plt.Axes]:
+    source_dict = dict(sorted(source.embedding.items()))
+    target_dict = dict(sorted(target.embedding.items()))
+
     if filtered_communities is None:
-        coords_source = np.array(list(source.embedding.values()))
-        coords_target = np.array(list(target.embedding.values()))
+        coords_source = np.array(list(source_dict.values()))
+        coords_target = np.array(list(target_dict.values()))
     else:
         # Filter nodes based on the specified communities
         filtered_node_ids = [
@@ -390,12 +393,8 @@ def plot_pos_movements(
         ]
 
         # Filter embeddings to only include nodes from the specified communities
-        filtered_source_dict = {
-            node: source.embedding[node] for node in filtered_node_ids
-        }
-        filtered_target_dict = {
-            node: target.embedding[node] for node in filtered_node_ids
-        }
+        filtered_source_dict = {node: source_dict[node] for node in filtered_node_ids}
+        filtered_target_dict = {node: target_dict[node] for node in filtered_node_ids}
 
         coords_source = np.array(list(filtered_source_dict.values()))
         coords_target = np.array(list(filtered_target_dict.values()))
@@ -413,7 +412,10 @@ def plot_pos_movements(
                 for node in filtered_node_ids
             }
         else:
-            community_dict = nx.get_node_attributes(target.sim_graph, "community")
+            community_dict = {
+                node: target.sim_graph.nodes[node]["community"]
+                for node in list(target.embedding.keys())
+            }
 
         plt.quiver(
             coords_source[:, 0],
