@@ -80,7 +80,7 @@ def run_pipeline(
             start=min_w, stop=max_w, num=community_resolution_amount
         )
 
-        community_resolutions = round(community_resolutions, 2)
+        community_resolutions = np.round(community_resolutions, 2)
 
         range_w = max_w - min_w
         padding = range_w * 0.05
@@ -122,7 +122,7 @@ def run_pipeline(
                     modified_embedding,
                     layout_method=layout_method,
                     layout_param=iteration,
-                    boundary_neigbors=boundary_neigbors,
+                    boundary_neighbors=boundary_neigbors,
                     inplace=False,
                     verbose=verbose,
                 )
@@ -140,40 +140,31 @@ def run_pipeline(
                     layout_method=layout_method,
                     layout_param=iteration,
                     precomputed_positions=mds_positions,
-                    boundary_neigbors=boundary_neigbors,
+                    boundary_neighbors=boundary_neigbors,
                     inplace=False,
                     verbose=verbose,
                 )
                 embeddings.append(modified_embedding)
-            for iteration in iterations:
-                embeddings.append(
-                    compute_modified_positions(
-                        modified_embedding,
-                        layout_method=layout_method,
-                        layout_iterations=iteration,
-                        boundary_neigbors=boundary_neigbors,
-                        inplace=False,
-                        verbose=verbose,
-                    )
-                )
+
         else:
             modified_embedding, _ = compute_modified_positions(
                 modified_embedding,
                 target_dists=feat_sim,
                 layout_method=layout_method,
                 layout_param=layout_param,
-                boundary_neigbors=boundary_neigbors,
+                boundary_neighbors=boundary_neigbors,
                 inplace=False,
                 verbose=verbose,
             )
             embeddings.append(modified_embedding)
+
     if compute_metrics:
         # 5.1 Step: compute global metrics
         evaluation.compute_global_metrics(
             data,
             embeddings,
             sim_features,
-            fixed_k=reference.k_neighbors,
+            fixed_k=reference.metadata["k_neighbors"],
             inplace=True,
             verbose=verbose,
         )
@@ -265,7 +256,13 @@ def dimensionality_reduction_umap(
         title=f"UMAP (n_neigbors: {n_neighbors}, min_dist: {min_dist})",
     )
 
-    umap_embedding.k_neighbors = n_neighbors
+    umap_embedding.metadata["dr_method"] = "UMAP"
+    umap_embedding.metadata["dr_params"] = {
+        "n_neighbors": n_neighbors,
+        "min_dist": min_dist,
+        "random_state": random_state,
+    }
+    umap_embedding.metadata["k_neighbors"] = n_neighbors
 
     if not compute_metrics:
         return umap_embedding
@@ -398,6 +395,10 @@ def com_detection_leiden(
 
     embedding.com_partition = comm_dict
     embedding.title = embedding.title + f", Leiden (resolution: {resolution_parameter})"
+    embedding.metadata["community_detection_method"] = "Leiden"
+    embedding.metadata["community_detection_params"] = {
+        "resolution": resolution_parameter
+    }
 
     if verbose:
         end_time = time.time()
@@ -413,7 +414,7 @@ def compute_modified_positions(
     layout_param: int,
     layout_method: str = "KK",
     layout_scale: int = 1,
-    boundary_neigbors: bool = False,
+    boundary_neighbors: bool = False,
     target_dists: Optional[npt.NDArray[np.float32]] = None,
     precomputed_positions: Optional[dict[int, npt.NDArray[np.float32]]] = None,
     inplace: bool = False,
@@ -432,7 +433,7 @@ def compute_modified_positions(
         start_time = time.time()
 
     partition_subgraphs, partition_centers, partition_boundary_neighbors = (
-        compute_community_graphs(embedding, boundary_neigbors=boundary_neigbors)
+        compute_community_graphs(embedding, boundary_neigbors=boundary_neighbors)
     )
 
     embedding.partition_centers = partition_centers
@@ -460,13 +461,14 @@ def compute_modified_positions(
             target_dists,
             scale=5,
             boundary_neigbors=partition_boundary_neighbors
-            if boundary_neigbors
+            if boundary_neighbors
             else None,
             inplace=True,
             verbose=verbose,
         )
 
         embedding.title += ", KK layouting"
+        embedding.metadata["layout_method"] = "KK"
 
     elif layout_method == "MDS":
         if target_dists is None:
@@ -494,6 +496,8 @@ def compute_modified_positions(
         )
 
         embedding.title += f", MDS (balance factor: {layout_param})"
+        embedding.metadata["layout_method"] = "MDS"
+        embedding.metadata["layout_params"] = {"balance factor": layout_param}
 
     elif layout_method == "FR":
         compute_fruchterman_reingold_layout(
@@ -502,13 +506,16 @@ def compute_modified_positions(
             scale=layout_scale,
             iterations=layout_param,
             boundary_neigbors=partition_boundary_neighbors
-            if boundary_neigbors
+            if boundary_neighbors
             else None,
             inplace=True,
             verbose=verbose,
         )
 
         embedding.title += f", FR layouting (iterations: {layout_param})"
+        embedding.metadata["layout_method"] = "FR"
+        embedding.metadata["layout_params"] = {"iterations": layout_param}
+
     else:
         raise ValueError(
             f"Layout method '{layout_method}' is not supported. Currently, only 'KK' (Kamada Kawai) and 'FR' (Fruchterman-Reingold) are available."
@@ -521,8 +528,9 @@ def compute_modified_positions(
         )
         print("------------------------------------------------------------")
 
-    if boundary_neigbors:
+    if boundary_neighbors:
         embedding.title += ", boundary edges added"
+        embedding.metadata["boundary_neighbors"] = partition_boundary_neighbors
 
     return embedding, mds_positions
 

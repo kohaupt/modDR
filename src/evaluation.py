@@ -17,7 +17,6 @@ from embedding_obj import EmbeddingObj
 def compute_kruskal_stress(
     highdim_dists: npt.NDArray[np.float32], lowdim_dists: npt.NDArray[np.float32]
 ) -> float:
-    # warnings.filterwarnings("error")
     if not highdim_dists.any():
         print("WARNING: Highdim distances are all 0. Returning *absolute* stress.")
         stress_numerator = np.sum((highdim_dists - lowdim_dists) ** 2)
@@ -258,9 +257,9 @@ def compute_global_metrics(
 
                     R[k] = (m * QNN[k - 1] - k) / (m - k)
 
-                emb.m_trustworthiness = np.mean(T)
-                emb.m_continuity = np.mean(C)
-                emb.m_rnx = np.mean(R)
+                emb.metrics["trustworthiness"] = np.mean(T)
+                emb.metrics["continuity"] = np.mean(C)
+                emb.metrics["rnx"] = np.mean(R)
 
             else:
                 k = fixed_k
@@ -278,14 +277,14 @@ def compute_global_metrics(
                 # R = ((m - 1) * QNN[k-1] - k) / (m - 1 - k)
                 R = (m * QNN[k - 1] - k) / (m - k)
 
-                emb.m_trustworthiness = T
-                emb.m_continuity = C
-                emb.m_rnx = R
+                emb.metrics["trustworthiness"] = T
+                emb.metrics["continuity"] = C
+                emb.metrics["rnx"] = R
 
             global_rank_score_list = [
-                emb.m_trustworthiness,
-                emb.m_continuity,
-                emb.m_rnx,
+                emb.metrics["trustworthiness"],
+                emb.metrics["continuity"],
+                emb.metrics["rnx"],
             ]
             global_rank_score_nominator = np.sum(global_rank_score_list)
 
@@ -295,12 +294,12 @@ def compute_global_metrics(
                 global_rank_score_denominator = len(
                     [x for x in global_rank_score_list if x > 0.0]
                 )
-                emb.m_global_rank_score = (
+                emb.metrics["global_rank_score"] = (
                     global_rank_score_nominator / global_rank_score_denominator
                 )
 
-            emb.coranking_matrix = cr_matrix
-            emb.m_q_local = Qlocal
+            emb.metrics["coranking_matrix"] = cr_matrix
+            emb.metrics["q_local"] = Qlocal
 
         if distance_metrics:
             if emb.com_partition is None:
@@ -311,7 +310,7 @@ def compute_global_metrics(
                 highdim_df, sim_features=target_features, invert=False
             )
 
-            emb.m_kruskal_stress_community = compute_kruskal_stress_community(
+            emb.metrics["kruskal_stress_community"] = compute_kruskal_stress_community(
                 D_highdim_feat, D_lowdim, emb.com_partition
             )
 
@@ -319,17 +318,19 @@ def compute_global_metrics(
             reference_com_stress = compute_kruskal_stress_community(
                 D_highdim_feat, reference_lowdim, emb.com_partition
             )
-            emb.m_kruskal_stress_comm_diff = (
-                emb.m_kruskal_stress_community - reference_com_stress
+            emb.metrics["kruskal_stress_comm_diff"] = (
+                emb.metrics["kruskal_stress_community"] - reference_com_stress
             )
 
             D_highdim_feat = squareform(D_highdim_feat)
             D_lowdim = squareform(D_lowdim)
 
-            emb.m_kruskal_stress = compute_kruskal_stress(D_highdim_feat, D_lowdim)
-            emb.m_shepard_spearman = metric_spearman(D_highdim_feat, D_lowdim)
+            emb.metrics["kruskal_stress"] = compute_kruskal_stress(
+                D_highdim_feat, D_lowdim
+            )
+            emb.metrics["shepard_spearman"] = metric_spearman(D_highdim_feat, D_lowdim)
 
-        emb.m_total_score = metric_total_score(emb)
+        emb.metrics["total_score"] = metric_total_score(emb)
 
         if verbose:
             end_time = time.time()
@@ -358,10 +359,10 @@ def compute_pairwise_metrics(
             print(f"Computing global metrics for embedding: `{emb.title}'.")
             start_time = time.time()
 
-        emb.m_jaccard = compute_jaccard_distances(
+        emb.metrics["jaccard"] = compute_jaccard_distances(
             highdim_data,
             np.array(list(emb.embedding.values())),
-            nhood_size=emb.k_neighbors,
+            nhood_size=emb.metadata["k_neighbors"],
         )
 
         if verbose:
@@ -447,11 +448,11 @@ def metric_total_score(
         "The number of weights must match the number of metrics."
     )
 
-    m_ql = embedding_obj.m_q_local
-    m_t = embedding_obj.m_trustworthiness
-    m_c = embedding_obj.m_continuity
-    m_ks = 1 - embedding_obj.m_kruskal_stress
-    m_rnx = embedding_obj.m_rnx
+    m_ql = embedding_obj.metrics["q_local"]
+    m_t = embedding_obj.metrics["trustworthiness"]
+    m_c = embedding_obj.metrics["continuity"]
+    m_ks = 1 - embedding_obj.metrics["kruskal_stress"]
+    m_rnx = embedding_obj.metrics["rnx"]
     # m_s = embedding_obj.m_shepard_spearman
 
     metrics_list = [m_ql, m_t, m_c, m_ks, m_rnx]
@@ -464,36 +465,14 @@ def metric_total_score(
 
 def metrics_report(embeddings: list[EmbeddingObj]) -> pd.DataFrame:
     df = pd.DataFrame(
-        columns=[
-            "marker",
-            "m_total_score",
-            # "metric_jaccard (size)",
-            "m_q_local",
-            "m_trustworthiness",
-            "m_continuity",
-            "m_shepard_spearman",
-            "m_kruskal_stress",
-            "m_kruskal_stress_community",
-            "m_kruskal_stress_comm_diff",
-            "m_rnx",
-            "m_global_rank_score",
+        [
+            {
+                "obj_id": e.obj_id,
+                **e.metadata,
+                **e.metrics,
+            }
+            for e in embeddings
         ]
     )
-
-    for i, emb in enumerate(embeddings):
-        df.loc[i] = [
-            emb.obj_id,
-            emb.m_total_score,
-            # emb.m_jaccard.size,
-            emb.m_q_local,
-            emb.m_trustworthiness,
-            emb.m_continuity,
-            emb.m_shepard_spearman,
-            emb.m_kruskal_stress,
-            emb.m_kruskal_stress_community,
-            emb.m_kruskal_stress_comm_diff,
-            emb.m_rnx,
-            emb.m_global_rank_score,
-        ]
-
-    return df
+    # remove columns with pairwise metrics
+    return df.drop(columns=["jaccard", "coranking_matrix"])

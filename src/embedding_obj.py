@@ -1,9 +1,34 @@
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, TypedDict
 
 import networkx as nx
 import numpy as np
 import numpy.typing as npt
+
+
+class MetaDataDict(TypedDict):
+    dr_method: str
+    dr_params: dict[str, any]
+    k_neighbors: int
+    com_detection: str
+    com_detection_params: dict[str, any]
+    layout_method: str
+    layout_params: dict[str, any]
+
+
+class MetricsDict(TypedDict):
+    q_local: float
+    trustworthiness: float
+    continuity: float
+    shepard_spearman: float
+    kruskal_stress_community: float
+    kruskal_stress_comm_diff: float
+    kruskal_stress: float
+    rnx: float
+    global_rank_score: float
+    total_score: float
+    coranking_matrix: Optional[npt.NDArray[np.int32]]
+    jaccard: Optional[npt.NDArray[np.float32]]
 
 
 @dataclass
@@ -12,26 +37,13 @@ class EmbeddingObj:
     sim_graph: nx.Graph
     embedding: dict[int, npt.NDArray[np.float32]]
     edge_weights: npt.NDArray[np.float32]
+    metadata: MetaDataDict
+    metrics: MetricsDict
     title: Optional[str]
-
-    k_neighbors: int = 0
 
     com_partition: Optional[dict[int, list[int]]] = None
     partition_centers: Optional[dict[int, npt.NDArray[np.float32]]] = None
     labels: Optional[dict[int, float]] = None
-
-    coranking_matrix: Optional[npt.NDArray[int]] = None
-    m_jaccard: Optional[npt.NDArray[np.float32]] = None
-    m_q_local: float = 0.0
-    m_trustworthiness: float = 0.0
-    m_continuity: float = 0.0
-    m_shepard_spearman: float = 0.0
-    m_kruskal_stress_community: float = 0.0
-    m_kruskal_stress_comm_diff: float = 0.0
-    m_kruskal_stress: float = 0.0
-    m_rnx: float = 0.0
-    m_global_rank_score: float = 0.0
-    m_total_score: float = 0.0
 
     def __init__(
         self,
@@ -60,6 +72,31 @@ class EmbeddingObj:
         self.labels = labels
         self.partition_centers = partition_centers
 
+        self.metadata = MetaDataDict(
+            dr_method="",
+            dr_params={},
+            k_neighbors=0,
+            community_detection_method="",
+            community_detection_params={},
+            layout_method="",
+            layout_params={},
+        )
+
+        self.metrics = MetricsDict(
+            coranking_matrix=None,
+            jaccard=None,
+            q_local=0.0,
+            trustworthiness=0.0,
+            continuity=0.0,
+            shepard_spearman=0.0,
+            kruskal_stress_community=0.0,
+            kruskal_stress_comm_diff=0.0,
+            kruskal_stress=0.0,
+            rnx=0.0,
+            global_rank_score=0.0,
+            total_score=0.0,
+        )
+
     def __str__(self) -> str:
         return (
             "---------------------------------------\n"
@@ -68,7 +105,6 @@ class EmbeddingObj:
             f"Graph: {self.sim_graph}\n"
             f"Embedding shape: {len(self.embedding.items())}\n"
             f"Shape of edge weights: {self.edge_weights.shape}\n\n"
-            f"Total score: {self.m_total_score if self.m_total_score is not None else 'not computed'}\n"
             "---------------------------------------"
         )
 
@@ -76,28 +112,5 @@ class EmbeddingObj:
         edges = self.sim_graph.edges(data=True)
         return np.array([e[-1]["weight"] for e in edges if "weight" in e[-1]])
 
-    def metrics_info(self) -> None:
-        output_str = "---------------------------------------\n"
-        output_str += f"Embedding object (ID: {self.obj_id})\n"
-
-        output_str += f"Total score: {self.m_total_score if self.m_total_score is not None else 'not computed'}\n"
-
-        if self.m_jaccard is not None:
-            output_str += f"Jaccard-Scores: {self.m_jaccard.size} (values)\n"
-        else:
-            output_str += "Jaccard-Scores: not computed\n"
-
-        if self.coranking_matrix is not None:
-            output_str += f"Co-Ranking Matrix: {self.coranking_matrix.shape[0]} x {self.coranking_matrix.shape[1]} (entries)\n"
-        else:
-            output_str += "Co-Ranking Matrix: not computed\n"
-
-        output_str += f"Q local: {self.m_q_local if self.m_q_local is not None else 'not computed'}\n"
-        output_str += f"Trustworthiness (AUC): {self.m_trustworthiness if self.m_trustworthiness is not None else 'not computed'}\n"
-        output_str += f"Continuity (AUC): {self.m_continuity if self.m_continuity is not None else 'not computed'}\n"
-        output_str += f"Spearman Score: {self.m_shepard_spearman if self.m_shepard_spearman is not None else 'not computed'}\n"
-        output_str += f"Normalized Stress: {self.m_kruskal_stress if self.m_kruskal_stress is not None else 'not computed'}\n"
-
-        output_str += "---------------------------------------\n\n"
-
-        print(output_str)
+    def get_metadata_str(self) -> str:
+        return " | ".join(f"{k}: {v}" for k, v in self.metadata.items() if v)
