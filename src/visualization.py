@@ -105,15 +105,25 @@ def display_graphs(
             axs[i].set_title(results[i].title, fontsize=10)
 
             if node_labels is not None:
-                nx.draw_networkx_labels(
-                    graph,
-                    positions,
-                    nx.get_node_attributes(graph, node_labels),
-                    font_size=12,
-                    horizontalalignment="left",
-                    verticalalignment="bottom",
-                    ax=axs[i],
-                )
+                if node_labels == "id":
+                    nx.draw_networkx_labels(
+                        graph,
+                        positions,
+                        font_size=12,
+                        horizontalalignment="left",
+                        verticalalignment="bottom",
+                        ax=axs[i],
+                    )
+                else:
+                    nx.draw_networkx_labels(
+                        graph,
+                        positions,
+                        nx.get_node_attributes(graph, node_labels),
+                        font_size=12,
+                        horizontalalignment="left",
+                        verticalalignment="bottom",
+                        ax=axs[i],
+                    )
 
             if show_cbar:
                 cbar = fig.colorbar(sm, ax=axs[i], shrink=0.8)
