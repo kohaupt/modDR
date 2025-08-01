@@ -1,6 +1,7 @@
 import copy
+import re
 import time
-from typing import Any, Optional
+from typing import Any
 
 import leidenalg as la
 import networkx as nx
@@ -29,7 +30,7 @@ def run_pipeline(
     community_resolution_amount: int = 3,
     layout_method: str = "KK",
     boundary_neigbors: bool = False,
-    layout_param: Optional[list[int]] = None,
+    layout_param: list[int] | None = None,
     compute_metrics: bool = True,
     verbose: bool = False,
 ) -> list[EmbeddingObj]:
@@ -80,13 +81,13 @@ def run_pipeline(
             start=min_w, stop=max_w, num=community_resolution_amount
         )
 
-        community_resolutions = np.round(community_resolutions, 2)
-
         range_w = max_w - min_w
         padding = range_w * 0.05
 
         community_resolutions[0] = min_w + padding
         community_resolutions[-1] = max_w - padding
+
+        community_resolutions = np.round(community_resolutions, 2)
 
         if verbose:
             print(
@@ -102,15 +103,17 @@ def run_pipeline(
     reference.com_partition = {0: np.arange(len(reference.embedding))}
     nx.set_node_attributes(reference.sim_graph, 0, "community")
 
+    reference.obj_id = 0
     embeddings = [reference]
 
+    id_counter = 1
     for resolution in community_resolutions:
-        modified_embedding = com_detection_leiden(
-            reference, resolution_parameter=resolution, verbose=verbose
+        community_embedding = com_detection_leiden(
+            reference, resolution_parameter=resolution, inplace=False, verbose=verbose
         )
 
         assign_graph_edge_weights(
-            modified_embedding, feat_sim, inplace=True, verbose=verbose
+            community_embedding, feat_sim, inplace=True, verbose=verbose
         )
 
         if layout_method == "FR":
@@ -118,6 +121,10 @@ def run_pipeline(
                 layout_param = [10]
 
             for iteration in layout_param:
+                modified_embedding = copy.deepcopy(community_embedding)
+                modified_embedding.obj_id = id_counter
+                id_counter += 1
+
                 modified_embedding, _ = compute_modified_positions(
                     modified_embedding,
                     layout_method=layout_method,
@@ -128,12 +135,16 @@ def run_pipeline(
                 )
                 embeddings.append(modified_embedding)
 
-        if layout_method == "MDS":
+        elif layout_method == "MDS":
             if layout_param is None:
                 layout_param = [10]
 
             mds_positions = None
             for iteration in layout_param:
+                modified_embedding = copy.deepcopy(community_embedding)
+                modified_embedding.obj_id = id_counter
+                id_counter += 1
+
                 modified_embedding, mds_positions = compute_modified_positions(
                     modified_embedding,
                     target_dists=feat_sim,
@@ -146,9 +157,9 @@ def run_pipeline(
                 )
                 embeddings.append(modified_embedding)
 
-        else:
+        elif layout_method == "KK":
             modified_embedding, _ = compute_modified_positions(
-                modified_embedding,
+                community_embedding,
                 target_dists=feat_sim,
                 layout_method=layout_method,
                 layout_param=layout_param,
@@ -156,6 +167,9 @@ def run_pipeline(
                 inplace=False,
                 verbose=verbose,
             )
+            modified_embedding.obj_id = id_counter
+            id_counter += 1
+
             embeddings.append(modified_embedding)
 
     if compute_metrics:
@@ -278,7 +292,7 @@ def compute_pairwise_dists(
     invert: bool = False,
     normalize: bool = False,
     no_null: bool = False,
-    sim_features: Optional[list[str]] = None,
+    sim_features: list[str] | None = None,
 ) -> npt.NDArray[np.float32]:
     """
     2. Step of the modDR pipeline: Feature Similarity Computation.
@@ -413,8 +427,8 @@ def compute_modified_positions(
     layout_method: str = "KK",
     layout_scale: int = 1,
     boundary_neighbors: bool = False,
-    target_dists: Optional[npt.NDArray[np.float32]] = None,
-    precomputed_positions: Optional[dict[int, npt.NDArray[np.float32]]] = None,
+    target_dists: npt.NDArray[np.float32] | None = None,
+    precomputed_positions: dict[int, npt.NDArray[np.float32]] | None = None,
     inplace: bool = False,
     verbose: bool = False,
 ) -> tuple[EmbeddingObj, npt.NDArray[np.float32]]:
@@ -435,6 +449,7 @@ def compute_modified_positions(
     )
 
     embedding.partition_centers = partition_centers
+    computed_positions = None
 
     if layout_method == "KK":
         if target_dists is None:
@@ -458,7 +473,7 @@ def compute_modified_positions(
             partition_subgraphs,
             target_dists,
             scale=5,
-            boundary_neigbors=partition_boundary_neighbors
+            boundary_neighbors=partition_boundary_neighbors
             if boundary_neighbors
             else None,
             inplace=True,
@@ -483,12 +498,15 @@ def compute_modified_positions(
         )
         target_dists = target_dists * target_scaling
 
-        _, mds_positions = compute_mds_layout(
+        _, computed_positions = compute_mds_layout(
             embedding,
             partition_subgraphs,
             target_dists,
             balance_factor=layout_param,
             precomputed=precomputed_positions,
+            boundary_neighbors=partition_boundary_neighbors
+            if boundary_neighbors
+            else None,
             inplace=True,
             verbose=verbose,
         )
@@ -508,7 +526,7 @@ def compute_modified_positions(
             partition_subgraphs,
             scale=layout_scale,
             iterations=layout_param,
-            boundary_neigbors=partition_boundary_neighbors
+            boundary_neighbors=partition_boundary_neighbors
             if boundary_neighbors
             else None,
             inplace=True,
@@ -534,9 +552,8 @@ def compute_modified_positions(
     embedding.metadata["layout_params"]["boundary_neighbors"] = boundary_neighbors
     if boundary_neighbors:
         embedding.title += ", boundary edges added"
-        embedding.metadata["boundary_neighbors"] = partition_boundary_neighbors
 
-    return embedding, mds_positions
+    return embedding, computed_positions
 
 
 def compute_distance_scaling(
@@ -589,7 +606,7 @@ def compute_kamada_kawai_layout(
     partition_subgraphs: dict[int, nx.Graph],
     pairwise_dists: npt.NDArray[np.float32],
     scale: int,
-    boundary_neigbors: Optional[dict[int, list[int]]] = None,
+    boundary_neighbors: dict[int, list[int]] | None = None,
     inplace: bool = False,
     verbose: bool = False,
 ) -> EmbeddingObj:
@@ -626,8 +643,8 @@ def compute_kamada_kawai_layout(
             scale=scale,
         )
 
-        if boundary_neigbors is not None:
-            for boundary_node in boundary_neigbors[part_key]:
+        if boundary_neighbors is not None:
+            for boundary_node in boundary_neighbors[part_key]:
                 subgraph_updated_pos.pop(boundary_node, None)
 
         embedding.embedding.update(subgraph_updated_pos)
@@ -641,7 +658,7 @@ def compute_fruchterman_reingold_layout(
     partition_subgraphs: dict[int, nx.Graph],
     scale: int,
     iterations: int,
-    boundary_neigbors: Optional[dict[int, list[int]]] = None,
+    boundary_neighbors: dict[int, list[int]] | None = None,
     inplace: bool = False,
     verbose: bool = False,
 ) -> EmbeddingObj:
@@ -662,8 +679,8 @@ def compute_fruchterman_reingold_layout(
             part_graph,
             pos=subgraph_pos,
             iterations=iterations,
-            fixed=boundary_neigbors[part_key]
-            if boundary_neigbors is not None and len(boundary_neigbors[part_key]) > 0
+            fixed=boundary_neighbors[part_key]
+            if boundary_neighbors is not None and len(boundary_neighbors[part_key]) > 0
             else None,
             threshold=0.0001,
             weight="weight",
@@ -673,8 +690,8 @@ def compute_fruchterman_reingold_layout(
             seed=0,
         )
 
-        if boundary_neigbors is not None:
-            for boundary_node in boundary_neigbors[part_key]:
+        if boundary_neighbors is not None:
+            for boundary_node in boundary_neighbors[part_key]:
                 subgraph_updated_pos.pop(boundary_node, None)
 
         embedding.embedding.update(subgraph_updated_pos)
@@ -689,6 +706,7 @@ def compute_mds_layout(
     pairwise_dists: npt.NDArray[np.float32],
     balance_factor: float = 0.5,
     precomputed: dict[int, npt.NDArray[np.float32]] = None,
+    boundary_neighbors: dict[int, list[int]] | None = None,
     inplace: bool = False,
     verbose: bool = False,
 ) -> tuple[EmbeddingObj, dict[int, npt.NDArray[np.float32]]]:
@@ -702,17 +720,22 @@ def compute_mds_layout(
     if verbose:
         print("Start computation with MDS-algorithm.")
 
+    # saves the original positions of the original embedding
     original_pos_dict = embedding.embedding.copy()
-    updated_pos_dict = {}
-    updated_pos_dict_scaled = {}
+
+    # saves the updated positions after MDS layouting (returned for precomputed positions)
+    updated_pos_dict = embedding.embedding.copy()
+
+    # saves the final updated (scaled) positions after MDS layouting
+    updated_pos_dict_scaled = embedding.embedding.copy()
 
     if precomputed is not None:
         updated_pos_dict = precomputed.copy()
         updated_pos_dict_scaled.update(
             {
-                node: precomputed[i] * balance_factor
-                + (1 - balance_factor) * original_pos_dict[node]
-                for i, node in enumerate(original_pos_dict.keys())
+                key: precomputed[key] * balance_factor
+                + (1 - balance_factor) * original_pos_dict[key]
+                for key in updated_pos_dict
             }
         )
     else:
@@ -751,25 +774,26 @@ def compute_mds_layout(
             ).embedding_
 
             new_pos += embedding.partition_centers[part_key]
+            new_post_dict = {node: new_pos[i] for i, node in enumerate(subgraph_pos)}
 
-            updated_pos_dict.update(
-                {node: new_pos[i] for i, node in enumerate(subgraph_pos.keys())}
-            )
+            if boundary_neighbors is not None:
+                for boundary_node in boundary_neighbors[part_key]:
+                    new_post_dict.pop(boundary_node, None)
 
-            # rescale by adding the original position
-            t = balance_factor
+            updated_pos_dict.update(new_post_dict)
 
             updated_pos_dict_scaled.update(
                 {
-                    node: new_pos[i] * t + (1 - t) * original_pos_dict[node]
-                    for i, node in enumerate(subgraph_pos.keys())
+                    key: new_post_dict[key] * balance_factor
+                    + (1 - balance_factor) * original_pos_dict[key]
+                    for key in new_post_dict
                 }
             )
 
-    embedding.embedding = updated_pos_dict_scaled
-
+    updated_pos_dict_scaled = dict(sorted(updated_pos_dict_scaled.items()))
     updated_pos_dict = dict(sorted(updated_pos_dict.items()))
-    embedding.embedding = dict(sorted(embedding.embedding.items()))
+
+    embedding.embedding = updated_pos_dict_scaled
 
     return embedding, updated_pos_dict
 
@@ -781,10 +805,10 @@ def deprecated_compute_kamada_kawai_layout(
     partition_subgraphs: dict[int, nx.Graph],
     partition_dict: dict[int, float],
     level: int,
-    threshold: Optional[float] = None,
+    threshold: float | None = None,
     mst: bool = False,
     boundary_edges: bool = False,
-    pairwise_dists: Optional[npt.NDArray[np.float32]] = None,
+    pairwise_dists: npt.NDArray[np.float32] | None = None,
 ) -> EmbeddingObj:
     modified_embedding_dict = embedding_dict.copy()
 
@@ -902,11 +926,11 @@ def compute_local_force_directed(
     graph: nx.Graph,
     initial_pos: npt.NDArray[np.float32],
     iterations: list[int],
-    threshold: Optional[float] = None,
+    threshold: float | None = None,
     mst: bool = False,
     boundary_edges: bool = False,
     method: str = "kawai",
-    pairwise_dists: Optional[npt.NDArray[np.float32]] = None,
+    pairwise_dists: npt.NDArray[np.float32] | None = None,
 ) -> tuple[list[EmbeddingObj], dict[int, int]]:
     partition_dict = community_louvain.best_partition(graph, random_state=0)
 
@@ -1013,7 +1037,7 @@ def compute_multilevel_dr(
     pairwise_dists: npt.NDArray[np.float32],
     mst: bool = False,
     boundary_edges: bool = False,
-    threshold: Optional[float] = None,
+    threshold: float | None = None,
 ) -> list[EmbeddingObj]:
     dendrogram = community_louvain.generate_dendrogram(graph, random_state=0)
 
@@ -1311,7 +1335,7 @@ def compute_spring_electrical_layout(
     partition_subgraphs=dict[int, nx.Graph],
     partition_dict=dict[int, float],
     partition_boundary_neighbors=dict[int, npt.NDArray[int]],
-    threshold: Optional[float] = None,
+    threshold: float | None = None,
     mst: bool = False,
     boundary_edges: bool = False,
 ) -> list[EmbeddingObj]:
@@ -1375,7 +1399,7 @@ def compute_knn_graph(
     df: pd.DataFrame,
     n_neighbors: int = 3,
     mode: str = "distance",
-    sim_features: Optional[list[str]] = None,
+    sim_features: list[str] | None = None,
 ) -> tuple[nx.Graph, npt.NDArray[np.float32]]:
     if sim_features is None or len(sim_features) == 0:
         knn_graph = kneighbors_graph(df, n_neighbors=n_neighbors, mode=mode)
@@ -1401,8 +1425,8 @@ def fit(
     sim_features: list[str],
     method: str = "force-directed",
     n_neighbors: int = 3,
-    iterations: Optional[list[int]] = None,
-    knn_graph: Optional[nx.Graph] = None,
+    iterations: list[int] | None = None,
+    knn_graph: nx.Graph | None = None,
 ) -> list[EmbeddingObj]:
     # TODO: Add assertion for falsy parameters
     if iterations is None:
