@@ -6,6 +6,7 @@ import networkx as nx
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
+import plotly.express as px
 import plotly.figure_factory as ff
 import seaborn as sb
 from numpy.typing import ArrayLike
@@ -27,6 +28,7 @@ def display_graphs(
     cbar_labels: Optional[list[str]] = None,
     show_edges: bool = True,
     show_partition_centers: bool = False,
+    show_title: bool = True,
     node_colors: Optional[str] = None,
     node_labels: Optional[str] = None,
 ) -> None:
@@ -102,7 +104,10 @@ def display_graphs(
                 cmap=cmap,
             )
 
-            axs[i].set_title(results[i].title, fontsize=10)
+            if show_title:
+                axs[i].set_title(
+                    f"ID: {results[i].obj_id} \n{results[i].title}", fontsize=10
+                )
 
             if node_labels is not None:
                 if node_labels == "id":
@@ -145,6 +150,7 @@ def plot_community_graphs(
     node_labels: Optional[str] = None,
     community_ids: Optional[list[int]] = None,
     boundary_edges: bool = False,
+    show_title: bool = True,
 ) -> None:
     figsize_rows = math.ceil(len(results) / figsize_columns)
     fig_width = figsize_columns * figsize[0]
@@ -238,7 +244,10 @@ def plot_community_graphs(
                 cmap=cmap,
             )
 
-            axs[i].set_title(results[i].title, fontsize=10)
+            if show_title:
+                axs[i].set_title(
+                    f"ID: {results[i].obj_id} \n{results[i].title}", fontsize=10
+                )
 
         else:
             fig.delaxes(axs[i])
@@ -304,81 +313,81 @@ def plot_shepard_diagram(
     plt.show()
 
 
-def plot_metrics_report(data: pd.DataFrame) -> None:
-    df_melted = data.drop("metric_jaccard (size)", axis=1).melt(
-        id_vars="Modified Version", var_name="Metric", value_name="Score"
-    )
-    sb.set_style("whitegrid", {"axes.grid": False})
-    ax = sb.lineplot(
-        data=df_melted,
-        x="Modified Version",
-        y="Score",
-        hue="Metric",
-        palette="muted",
-        marker="o",
-    )
+def plot_metrics_report(data: pd.DataFrame, save_path: str = None) -> None:
+    df_melted = data.melt(id_vars="obj_id", var_name="Metric", value_name="Score")
 
-    sb.move_legend(ax, "upper left", bbox_to_anchor=(1, 1))
+    metrics = data.columns.drop("obj_id")
 
+    marker_list = ["o", "s", "D", "^", "v", "<", ">", "P", "X", "*", "h", "H"]
+    marker_map = {
+        metric: marker_list[i % len(marker_list)] for i, metric in enumerate(metrics)
+    }
 
-def plot_metrics_report_new(
-    data: pd.DataFrame, dual_axis_feature: str = "m_kruskal_stress"
-) -> None:
-    # Entferne das Jaccard-Merkmal
-    data_clean = data.drop("metric_jaccard (size)", axis=1)
+    palette = sb.color_palette("colorblind", n_colors=len(metrics))
+    color_map = {metric: palette[i] for i, metric in enumerate(metrics)}
 
-    data_clean = data_clean.melt(
-        id_vars="marker", var_name="Feature", value_name="Value"
-    )
+    sb.set_style("white")
+    fig, ax = plt.subplots(figsize=(10, 7))
 
-    # # Setze Marker-Spalte als Index
-    # data_clean = data_clean.set_index("marker")
+    for metric in metrics:
+        subset = df_melted[df_melted["Metric"] == metric]
+        ax.plot(
+            subset["obj_id"],
+            subset["Score"],
+            label=metric,
+            marker=marker_map[metric],
+            color=color_map[metric],
+            linestyle="solid",
+            linewidth=1.2,
+            markersize=6,
+            markerfacecolor="none",
+            markeredgecolor=color_map[metric],
+        )
 
-    # Trenne in primäre und sekundäre Features
-    primary_features = [col for col in data_clean.columns if col != dual_axis_feature]
+    ax.set_xlabel("Object ID", fontsize=12)
+    ax.set_ylabel("Score", fontsize=12)
+    ax.tick_params(labelsize=10)
+    ax.yaxis.grid(True, linestyle="--", linewidth=0.5, alpha=1.0)
+    ax.xaxis.grid(False)
+    ax.legend(title=None, bbox_to_anchor=(1.05, 1), loc="upper left", fontsize=10)
+    sb.despine()
 
-    fig, ax1 = plt.subplots(figsize=(10, 6))
-
-    # Plot für primäre Features
-    ax1.plot(
-        data_clean,
-        marker="o",
-        linewidth=2,
-    )
-
-    ax1.set_ylabel("Metrics Score", fontsize=12)
-    ax1.set_xlabel("Modified Version", fontsize=12)
-    ax1.tick_params(axis="y", labelcolor="black")
-    ax1.tick_params(axis="x", rotation=45)
-
-    # Sekundäre Y-Achse für das spezifizierte Feature
-    ax2 = ax1.twinx()
-    ax2.plot(
-        data_clean.index,
-        data_clean[dual_axis_feature],
-        label=dual_axis_feature,
-        marker="o",
-        linewidth=2,
-        linestyle="--",
-    )
-    ax2.set_ylabel(f"Metrics Score ({dual_axis_feature})", fontsize=12)
-    ax2.tick_params(axis="y", rotation=45)
-
-    # Legenden kombinieren
-    lines1, labels1 = ax1.get_legend_handles_labels()
-    lines2, labels2 = ax2.get_legend_handles_labels()
-    ax1.legend(
-        lines1 + lines2,
-        labels1 + labels2,
-        loc="upper left",
-        bbox_to_anchor=(1, 1),
-        frameon=False,
-    )
-
-    plt.title("Metrics Report", fontsize=14, weight="bold")
     plt.tight_layout()
+
+    if save_path:
+        plt.rcParams.update(
+        {
+            "text.usetex": True,
+            "font.family": "serif",
+            "font.serif": ["Computer Modern Roman"],
+        }
+        )
+        plt.savefig(f"{save_path}.svg", bbox_inches="tight", dpi=300, format="svg", transparent=True)
+
     plt.show()
 
+
+def plot_metrics_report_plotly(data: pd.DataFrame) -> None:
+    df_melted = data.melt(id_vars="obj_id", var_name="Metric", value_name="Score")
+    fig = px.line(
+        df_melted,
+        x="obj_id",
+        y="Score",
+        color="Metric",
+        markers=True,
+        color_discrete_sequence=px.colors.qualitative.Safe,
+    )
+
+    fig.update_layout(
+        template="simple_white",
+        font=dict(size=12),
+        width=600,
+        height=400,
+        legend=dict(title=None, x=1.02, y=1, borderwidth=0, font=dict(size=10)),
+        margin=dict(l=40, r=40, t=20, b=40),
+    )
+
+    fig.show()
 
 def plot_pos_movements(
     source: EmbeddingObj,
@@ -387,6 +396,8 @@ def plot_pos_movements(
     filtered_communities: Optional[list[int]] = None,
     community_colors: bool = False,
     community_centers: bool = False,
+    plot_target_nodes: bool = False,
+    show_title: bool = True,
 ) -> tuple[plt.Figure, plt.Axes]:
     source_dict = dict(sorted(source.embedding.items()))
     target_dict = dict(sorted(target.embedding.items()))
@@ -471,7 +482,16 @@ def plot_pos_movements(
         ax.scatter(
             coords_community_centers[:, 0],
             coords_community_centers[:, 1],
-            # c=list(set(community_dict.keys())) if community_colors else "black",
+            c=list(set(community_dict.keys())) if community_colors else "black",
+        )
+
+    if plot_target_nodes:
+        ax.scatter(
+            coords_target[:, 0],
+            coords_target[:, 1],
+            c=list(target.labels.values()),
+            cmap=plt.cm.viridis,
+            zorder=3
         )
 
     all_x = np.concatenate([coords_source[:, 0], coords_target[:, 0]])
@@ -479,9 +499,10 @@ def plot_pos_movements(
     ax.set_xlim(all_x.min() - 0.5, all_x.max() + 0.5)
     ax.set_ylim(all_y.min() - 0.5, all_y.max() + 0.5)
 
-    ax.set_title(
-        f"Position movements from '{source.title}' to '{target.title}'", fontsize=10
-    )
+    if show_title:
+        ax.set_title(
+            f"Position movements from '{source.title}' to '{target.title}'", fontsize=10
+        )
 
     ax.set_axis_off()
     plt.tight_layout()
