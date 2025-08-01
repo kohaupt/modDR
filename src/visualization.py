@@ -1,5 +1,4 @@
 import math
-from typing import Optional
 
 import matplotlib.pyplot as plt
 import networkx as nx
@@ -25,12 +24,12 @@ def display_graphs(
     cmap: plt.cm = plt.cm.viridis,
     edge_cmap: plt.cm = plt.cm.viridis,
     show_cbar: bool = True,
-    cbar_labels: Optional[list[str]] = None,
+    cbar_labels: list[str] | None = None,
     show_edges: bool = True,
     show_partition_centers: bool = False,
     show_title: bool = True,
-    node_colors: Optional[str] = None,
-    node_labels: Optional[str] = None,
+    node_colors: str | None = None,
+    node_labels: str | None = None,
 ) -> None:
     figsize_rows = math.ceil(len(results) / figsize_columns)
     fig_width = figsize_columns * figsize[0]
@@ -86,7 +85,9 @@ def display_graphs(
                 node_colors += [0] * len(results[i].partition_centers)
                 node_sizes += [120] * len(results[i].partition_centers)
 
-                center_dict = dict(zip(node_idx, results[i].partition_centers.values()))
+                center_dict = dict(
+                    zip(node_idx, results[i].partition_centers.values(), strict=False)
+                )
                 positions.update(center_dict)
 
             nx.draw(
@@ -147,8 +148,8 @@ def plot_community_graphs(
     edge_cmap: plt.cm = plt.cm.viridis,
     show_partition_centers: bool = False,
     only_communities: bool = False,
-    node_labels: Optional[str] = None,
-    community_ids: Optional[list[int]] = None,
+    node_labels: str | None = None,
+    community_ids: list[int] | None = None,
     boundary_edges: bool = False,
     show_title: bool = True,
 ) -> None:
@@ -226,7 +227,9 @@ def plot_community_graphs(
                 node_colors += [0] * len(results[i].partition_centers)
                 node_sizes += [120] * len(results[i].partition_centers)
 
-                center_dict = dict(zip(node_idx, results[i].partition_centers.values()))
+                center_dict = dict(
+                    zip(node_idx, results[i].partition_centers.values(), strict=False)
+                )
                 positions.update(center_dict)
 
             nx.draw(
@@ -313,7 +316,9 @@ def plot_shepard_diagram(
     plt.show()
 
 
-def plot_metrics_report(data: pd.DataFrame, save_path: str = None) -> None:
+def plot_metrics_report(
+    data: pd.DataFrame, division: list[any] | None = None, save_path: str = None
+) -> None:
     df_melted = data.melt(id_vars="obj_id", var_name="Metric", value_name="Score")
 
     metrics = data.columns.drop("obj_id")
@@ -328,6 +333,27 @@ def plot_metrics_report(data: pd.DataFrame, save_path: str = None) -> None:
 
     sb.set_style("white")
     fig, ax = plt.subplots(figsize=(10, 7))
+    obj_ids = sorted(data["obj_id"].unique())
+
+    if division is not None:
+        step = (len(obj_ids)) // len(division)
+        gray_shades = ["#f0f0f0", "#e0e0e0"]
+
+        for i in range(1, len(obj_ids) - 1, step):
+            xmin = obj_ids[i]
+            xmax = obj_ids[i + step] - 1 if i + step < len(obj_ids) else obj_ids[-1]
+            shade_color = gray_shades[(i // step) % len(gray_shades)]
+            ax.axvspan(xmin, xmax, color=shade_color, alpha=0.5, zorder=0)
+            ax.text(
+                (xmin + xmax) / 2,
+                0.25,
+                f"Community size: \n {division[i // step]}",
+                ha="center",
+                va="center",
+                fontsize=9,
+                color="gray",
+                alpha=0.8,
+            )
 
     for metric in metrics:
         subset = df_melted[df_melted["Metric"] == metric]
@@ -345,6 +371,7 @@ def plot_metrics_report(data: pd.DataFrame, save_path: str = None) -> None:
         )
 
     ax.set_xlabel("Object ID", fontsize=12)
+    ax.set_xticks(obj_ids)
     ax.set_ylabel("Score", fontsize=12)
     ax.tick_params(labelsize=10)
     ax.yaxis.grid(True, linestyle="--", linewidth=0.5, alpha=1.0)
@@ -356,13 +383,19 @@ def plot_metrics_report(data: pd.DataFrame, save_path: str = None) -> None:
 
     if save_path:
         plt.rcParams.update(
-        {
-            "text.usetex": True,
-            "font.family": "serif",
-            "font.serif": ["Computer Modern Roman"],
-        }
+            {
+                "text.usetex": True,
+                "font.family": "serif",
+                "font.serif": ["Computer Modern Roman"],
+            }
         )
-        plt.savefig(f"{save_path}.svg", bbox_inches="tight", dpi=300, format="svg", transparent=True)
+        plt.savefig(
+            f"{save_path}.svg",
+            bbox_inches="tight",
+            dpi=300,
+            format="svg",
+            transparent=True,
+        )
 
     plt.show()
 
@@ -389,11 +422,12 @@ def plot_metrics_report_plotly(data: pd.DataFrame) -> None:
 
     fig.show()
 
+
 def plot_pos_movements(
     source: EmbeddingObj,
     target: EmbeddingObj,
     figsize: tuple[int, int] = (15, 15),
-    filtered_communities: Optional[list[int]] = None,
+    filtered_communities: list[int] | None = None,
     community_colors: bool = False,
     community_centers: bool = False,
     plot_target_nodes: bool = False,
@@ -491,7 +525,7 @@ def plot_pos_movements(
             coords_target[:, 1],
             c=list(target.labels.values()),
             cmap=plt.cm.viridis,
-            zorder=3
+            zorder=3,
         )
 
     all_x = np.concatenate([coords_source[:, 0], coords_target[:, 0]])
