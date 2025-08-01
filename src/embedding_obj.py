@@ -17,15 +17,14 @@ class MetaDataDict(TypedDict):
 
 
 class MetricsDict(TypedDict):
-    q_local: float
     trustworthiness: float
     continuity: float
-    shepard_spearman: float
-    kruskal_stress_community: float
-    kruskal_stress_comm_diff: float
-    kruskal_stress: float
     rnx: float
-    global_rank_score: float
+    sim_stress: float
+    sim_stress_com: float
+    sim_stress_com_diff: float
+    rank_score: float
+    distance_score: float
     total_score: float
     coranking_matrix: Optional[npt.NDArray[np.int32]]
     jaccard: Optional[npt.NDArray[np.float32]]
@@ -76,25 +75,24 @@ class EmbeddingObj:
             dr_method="",
             dr_params={},
             k_neighbors=0,
-            community_detection_method="",
-            community_detection_params={},
+            com_detection="",
+            com_detection_params={},
             layout_method="",
             layout_params={},
         )
 
         self.metrics = MetricsDict(
-            coranking_matrix=None,
-            jaccard=None,
-            q_local=0.0,
             trustworthiness=0.0,
             continuity=0.0,
-            shepard_spearman=0.0,
-            kruskal_stress_community=0.0,
-            kruskal_stress_comm_diff=0.0,
-            kruskal_stress=0.0,
             rnx=0.0,
-            global_rank_score=0.0,
+            sim_stress=0.0,
+            sim_stress_com=0.0,
+            sim_stress_com_diff=0.0,
+            rank_score=0.0,
+            distance_score=0.0,
             total_score=0.0,
+            coranking_matrix=None,
+            jaccard=None,
         )
 
     def __str__(self) -> str:

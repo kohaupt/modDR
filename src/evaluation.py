@@ -1,6 +1,5 @@
 import copy
 import time
-from typing import Optional
 
 import numpy as np
 import numpy.typing as npt
@@ -184,7 +183,7 @@ def compute_global_metrics(
     highdim_df: pd.DataFrame,
     embeddings: list[EmbeddingObj],
     target_features: list[str],
-    fixed_k: Optional[int] = None,
+    fixed_k: int | None = None,
     ranking_metrics: bool = True,
     distance_metrics: bool = True,
     inplace: bool = False,
@@ -196,7 +195,9 @@ def compute_global_metrics(
 
     # compute pairwise distances + ranking matrix for highdim data
     D_highdim = processing.compute_pairwise_dists(highdim_df)
-    D_highdim_rank = [np.argsort(np.argsort(row)) for row in D_highdim]
+
+    if ranking_metrics:
+        D_highdim_rank = [np.argsort(np.argsort(row)) for row in D_highdim]
 
     # compute pairwise distances for reference data to compute differences in community-stress.
     # Assuming that the reference data is the same for all embeddings and is given by the first embedding.
@@ -215,6 +216,12 @@ def compute_global_metrics(
         D_lowdim = processing.compute_pairwise_dists(lowdim_df)
         D_lowdim_rank = [np.argsort(np.argsort(row)) for row in D_lowdim]
 
+        # The computation of the co-ranking matrix and its associated metrics is adapted from the
+        # pyDRMetrics package (https://github.com/zhangys11/pyDRMetrics) by Yinsheng Zhang (oo@zju.edu.cn / zhangys@illinois.edu)
+        # Original code licensed under Creative Commons Attribution 4.0 International (CC BY 4.0)
+        # See: https://creativecommons.org/licenses/by/4.0/
+        # Changes: Only compute the AUC of the metrics if needed,
+        # not automatically while computing the co-ranking matrix (for runtime efficiency).
         if ranking_metrics:
             cr_matrix = coranking_matrix(
                 np.asarray(D_highdim_rank, dtype=int),
@@ -228,15 +235,10 @@ def compute_global_metrics(
             C = np.zeros(m - 1)  # continuity
             R = np.zeros(m - 1)  # R-Quality (Rnx)
             QNN = np.zeros(m)  # Co-k-nearest neighbor size
-            LCMC = np.zeros(m)  # Local Continuity Meta Criterion
 
             Q_cumsum = np.cumsum(np.cumsum(Q, axis=0), axis=1)
             diag_idxs = np.arange(m)
             QNN = Q_cumsum[diag_idxs, diag_idxs] / ((diag_idxs + 1) * m)
-            LCMC = QNN - (diag_idxs + 1) / (m - 1)
-
-            kmax = np.argmax(LCMC)
-            Qlocal = np.sum(QNN[: kmax + 1]) / (kmax + 1)
 
             # TODO: add further validation for fixed_k
             if fixed_k is None:
@@ -250,7 +252,9 @@ def compute_global_metrics(
                     T[k] = (
                         1 - np.sum(Qs * W) / (k + 1) / m / (m - 1 - k)
                     )  # 1 - normalized hard-k-intrusions. lower-left region. weighted by rank error (rank - k)
-
+                    W = np.arange(Qs.shape[1]).reshape(
+                        1, -1
+                    )  # a row vector of weights. weight = rank error = actual_rank - k
                     C[k] = 1 - np.sum(Qs * W) / (k + 1) / m / (
                         m - 1 - k
                     )  # 1 - normalized hard-k-extrusions. upper-right region
@@ -270,7 +274,9 @@ def compute_global_metrics(
                 T = (
                     1 - np.sum(Qs * W) / (k + 1) / m / (m - 1 - k)
                 )  # 1 - normalized hard-k-intrusions. lower-left region. weighted by rank error (rank - k)
-
+                W = np.arange(Qs.shape[1]).reshape(
+                    1, -1
+                )  # a row vector of weights. weight = rank error = actual_rank - k
                 C = 1 - np.sum(Qs * W) / (k + 1) / m / (
                     m - 1 - k
                 )  # 1 - normalized hard-k-extrusions. upper-right region
@@ -281,25 +287,22 @@ def compute_global_metrics(
                 emb.metrics["continuity"] = C
                 emb.metrics["rnx"] = R
 
-            global_rank_score_list = [
+            rank_score_list = [
                 emb.metrics["trustworthiness"],
                 emb.metrics["continuity"],
                 emb.metrics["rnx"],
             ]
-            global_rank_score_nominator = np.sum(global_rank_score_list)
+            rank_score_nominator = np.sum(rank_score_list)
 
             # avoid division by zero if all scores are zero (not computed)
-            if global_rank_score_nominator > 0.0:
+            if rank_score_nominator > 0.0:
                 # compute global rank score as the average of the non-zero (i. e. computed) scores
-                global_rank_score_denominator = len(
-                    [x for x in global_rank_score_list if x > 0.0]
-                )
-                emb.metrics["global_rank_score"] = (
-                    global_rank_score_nominator / global_rank_score_denominator
+                rank_score_denominator = len([x for x in rank_score_list if x > 0.0])
+                emb.metrics["rank_score"] = (
+                    rank_score_nominator / rank_score_denominator
                 )
 
             emb.metrics["coranking_matrix"] = cr_matrix
-            emb.metrics["q_local"] = Qlocal
 
         if distance_metrics:
             if emb.com_partition is None:
@@ -310,7 +313,7 @@ def compute_global_metrics(
                 highdim_df, sim_features=target_features, invert=False
             )
 
-            emb.metrics["kruskal_stress_community"] = compute_kruskal_stress_community(
+            emb.metrics["sim_stress_com"] = compute_kruskal_stress_community(
                 D_highdim_feat, D_lowdim, emb.com_partition
             )
 
@@ -318,17 +321,32 @@ def compute_global_metrics(
             reference_com_stress = compute_kruskal_stress_community(
                 D_highdim_feat, reference_lowdim, emb.com_partition
             )
-            emb.metrics["kruskal_stress_comm_diff"] = (
-                emb.metrics["kruskal_stress_community"] - reference_com_stress
+            emb.metrics["sim_stress_com_diff"] = (
+                emb.metrics["sim_stress_com"] - reference_com_stress
             )
 
             D_highdim_feat = squareform(D_highdim_feat)
             D_lowdim = squareform(D_lowdim)
 
-            emb.metrics["kruskal_stress"] = compute_kruskal_stress(
-                D_highdim_feat, D_lowdim
-            )
-            emb.metrics["shepard_spearman"] = metric_spearman(D_highdim_feat, D_lowdim)
+            emb.metrics["sim_stress"] = compute_kruskal_stress(D_highdim_feat, D_lowdim)
+
+            stress_com_diff_norm = (emb.metrics["sim_stress_com_diff"] + 1) / 2
+
+            distance_score_list = [
+                emb.metrics["sim_stress"],
+                stress_com_diff_norm,
+            ]
+            distance_score_nominator = np.sum(distance_score_list)
+
+            # avoid division by zero if all scores are zero (not computed)
+            if distance_score_nominator > 0.0:
+                # compute rank score as the average of the non-zero (i. e. computed) scores
+                distance_score_denominator = len(
+                    [x for x in distance_score_list if x > 0.0]
+                )
+                emb.metrics["distance_score"] = 1 - (
+                    distance_score_nominator / distance_score_denominator
+                )
 
         emb.metrics["total_score"] = metric_total_score(emb)
 
@@ -437,33 +455,48 @@ def compute_sequence_change(
 
 def metric_total_score(
     embedding_obj: EmbeddingObj,
-    weights: Optional[ArrayLike] = None,
+    balance: float | None = 0.5,
 ) -> float:
-    n_metrics = 5
-
-    if weights is None:
-        weights = [1, 1, 1, 1, 1]
-
-    assert len(weights) == n_metrics, (
-        "The number of weights must match the number of metrics."
+    return (
+        balance * embedding_obj.metrics["rank_score"]
+        + (1 - balance) * embedding_obj.metrics["distance_score"]
     )
 
-    m_ql = embedding_obj.metrics["q_local"]
-    m_t = embedding_obj.metrics["trustworthiness"]
-    m_c = embedding_obj.metrics["continuity"]
-    m_ks = 1 - embedding_obj.metrics["kruskal_stress"]
-    m_rnx = embedding_obj.metrics["rnx"]
-    # m_s = embedding_obj.m_shepard_spearman
 
-    metrics_list = [m_ql, m_t, m_c, m_ks, m_rnx]
-    m_total = 0
-    for i in range(n_metrics):
-        m_total += weights[i] * metrics_list[i]
+def create_report(
+    embeddings: list[EmbeddingObj], metadata: bool = True, metrics: bool = True
+) -> pd.DataFrame:
+    if not metadata and not metrics:
+        raise ValueError("At least one of `metadata` or `metrics` must be True.")
 
-    return m_total / n_metrics
+    if not embeddings:
+        return pd.DataFrame()
 
+    if metadata and not metrics:
+        df = pd.DataFrame(
+            [
+                {
+                    "obj_id": e.obj_id,
+                    **e.metadata,
+                }
+                for e in embeddings
+            ]
+        )
+        return df
 
-def metrics_report(embeddings: list[EmbeddingObj]) -> pd.DataFrame:
+    if not metadata and metrics:
+        df = pd.DataFrame(
+            [
+                {
+                    "obj_id": e.obj_id,
+                    **e.metrics,
+                }
+                for e in embeddings
+            ]
+        )
+        return df.drop(columns=["jaccard", "coranking_matrix"])
+
+    # both metadata and metrics are True
     df = pd.DataFrame(
         [
             {

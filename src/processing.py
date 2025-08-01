@@ -395,10 +395,8 @@ def com_detection_leiden(
 
     embedding.com_partition = comm_dict
     embedding.title = embedding.title + f", Leiden (resolution: {resolution_parameter})"
-    embedding.metadata["community_detection_method"] = "Leiden"
-    embedding.metadata["community_detection_params"] = {
-        "resolution": resolution_parameter
-    }
+    embedding.metadata["com_detection"] = "Leiden"
+    embedding.metadata["com_detection_params"]["resolution"] = resolution_parameter
 
     if verbose:
         end_time = time.time()
@@ -495,9 +493,14 @@ def compute_modified_positions(
             verbose=verbose,
         )
 
-        embedding.title += f", MDS (balance factor: {layout_param})"
+        if precomputed_positions is not None:
+            pattern = r"MDS \(balance factor: [^)]+\)"
+            re.sub(pattern, f"MDS (balance factor: {layout_param})", embedding.title)
+        else:
+            embedding.title += f", MDS (balance factor: {layout_param})"
+
         embedding.metadata["layout_method"] = "MDS"
-        embedding.metadata["layout_params"] = {"balance factor": layout_param}
+        embedding.metadata["layout_params"]["balance factor"] = layout_param
 
     elif layout_method == "FR":
         compute_fruchterman_reingold_layout(
@@ -514,7 +517,7 @@ def compute_modified_positions(
 
         embedding.title += f", FR layouting (iterations: {layout_param})"
         embedding.metadata["layout_method"] = "FR"
-        embedding.metadata["layout_params"] = {"iterations": layout_param}
+        embedding.metadata["layout_params"]["iterations"] = layout_param
 
     else:
         raise ValueError(
@@ -528,6 +531,7 @@ def compute_modified_positions(
         )
         print("------------------------------------------------------------")
 
+    embedding.metadata["layout_params"]["boundary_neighbors"] = boundary_neighbors
     if boundary_neighbors:
         embedding.title += ", boundary edges added"
         embedding.metadata["boundary_neighbors"] = partition_boundary_neighbors
