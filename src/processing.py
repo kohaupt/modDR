@@ -1,5 +1,4 @@
 import copy
-import re
 import time
 from typing import Any
 
@@ -30,7 +29,7 @@ def run_pipeline(
     community_resolution_amount: int = 3,
     layout_method: str = "KK",
     boundary_neigbors: bool = False,
-    layout_param: list[int] | None = None,
+    layout_params: list[int] | None = None,
     compute_metrics: bool = True,
     verbose: bool = False,
 ) -> list[EmbeddingObj]:
@@ -43,8 +42,12 @@ def run_pipeline(
         print("Start modDR pipeline with the following parameters:")
         print(f"Dimensionality Reduction Method: {dr_method}")
         print(f"Graph Construction Method: {graph_method}")
-        print(f"Community Detection Resolutions: {community_resolutions}")
+        print(
+            f"Community Detection Resolutions: {community_resolutions if community_resolutions else 'automatic'}"
+        )
         print(f"Layout Method: {layout_method}")
+        print(f"Boundary Neighbors: {boundary_neigbors}")
+        print(f"Layout Parameters: {layout_params if layout_params else 'default'}")
         start_time = time.time()
 
     # 1. Step: dimensionality reduction
@@ -125,10 +128,10 @@ def run_pipeline(
         )
 
         if layout_method == "FR":
-            if layout_param is None:
-                layout_param = [10]
+            if layout_params is None:
+                layout_params = [10]
 
-            for iteration in layout_param:
+            for param in layout_params:
                 modified_embedding = copy.deepcopy(community_embedding)
                 modified_embedding.obj_id = id_counter
                 id_counter += 1
@@ -136,7 +139,7 @@ def run_pipeline(
                 modified_embedding, _ = compute_modified_positions(
                     modified_embedding,
                     layout_method=layout_method,
-                    layout_param=iteration,
+                    layout_param=param,
                     boundary_neighbors=boundary_neigbors,
                     inplace=False,
                     verbose=verbose,
@@ -144,11 +147,11 @@ def run_pipeline(
                 embeddings.append(modified_embedding)
 
         elif layout_method == "MDS":
-            if layout_param is None:
-                layout_param = [10]
+            if layout_params is None:
+                layout_params = [0.5]
 
             mds_positions = None
-            for iteration in layout_param:
+            for param in layout_params:
                 modified_embedding = copy.deepcopy(community_embedding)
                 modified_embedding.obj_id = id_counter
                 id_counter += 1
@@ -157,7 +160,7 @@ def run_pipeline(
                     modified_embedding,
                     target_dists=feat_sim,
                     layout_method=layout_method,
-                    layout_param=iteration,
+                    layout_param=param,
                     precomputed_positions=mds_positions,
                     boundary_neighbors=boundary_neigbors,
                     inplace=False,
@@ -166,19 +169,27 @@ def run_pipeline(
                 embeddings.append(modified_embedding)
 
         elif layout_method == "KK":
-            modified_embedding, _ = compute_modified_positions(
-                community_embedding,
-                target_dists=feat_sim,
-                layout_method=layout_method,
-                layout_param=layout_param,
-                boundary_neighbors=boundary_neigbors,
-                inplace=False,
-                verbose=verbose,
-            )
-            modified_embedding.obj_id = id_counter
-            id_counter += 1
+            if layout_params is None:
+                layout_params = [0.5]
 
-            embeddings.append(modified_embedding)
+            kk_positions = None
+            for param in layout_params:
+                modified_embedding = copy.deepcopy(community_embedding)
+                modified_embedding.obj_id = id_counter
+                id_counter += 1
+
+                modified_embedding, kk_positions = compute_modified_positions(
+                    modified_embedding,
+                    target_dists=feat_sim,
+                    layout_method=layout_method,
+                    layout_param=param,
+                    precomputed_positions=kk_positions,
+                    boundary_neighbors=boundary_neigbors,
+                    inplace=False,
+                    verbose=verbose,
+                )
+
+                embeddings.append(modified_embedding)
 
     if compute_metrics:
         # 5.1 Step: compute global metrics
@@ -431,8 +442,8 @@ def com_detection_leiden(
 
 def compute_modified_positions(
     embedding: EmbeddingObj,
-    layout_param: int,
-    layout_method: str = "KK",
+    layout_param: int | float,
+    layout_method: str,
     layout_scale: int = 1,
     boundary_neighbors: bool = False,
     target_dists: npt.NDArray[np.float32] | None = None,
@@ -476,11 +487,12 @@ def compute_modified_positions(
         )
         target_dists = target_dists * target_scaling
 
-        compute_kamada_kawai_layout(
+        _, computed_positions = compute_kamada_kawai_layout(
             embedding,
             partition_subgraphs,
             target_dists,
-            scale=5,
+            balance_factor=layout_param,
+            precomputed=precomputed_positions,
             boundary_neighbors=partition_boundary_neighbors
             if boundary_neighbors
             else None,
@@ -488,8 +500,9 @@ def compute_modified_positions(
             verbose=verbose,
         )
 
-        embedding.title += ", KK layouting"
+        embedding.title += f", KK (balance factor: {layout_param})"
         embedding.metadata["layout_method"] = "KK"
+        embedding.metadata["layout_params"]["balance factor"] = layout_param
 
     elif layout_method == "MDS":
         if target_dists is None:
@@ -519,12 +532,7 @@ def compute_modified_positions(
             verbose=verbose,
         )
 
-        if precomputed_positions is not None:
-            pattern = r"MDS \(balance factor: [^)]+\)"
-            re.sub(pattern, f"MDS (balance factor: {layout_param})", embedding.title)
-        else:
-            embedding.title += f", MDS (balance factor: {layout_param})"
-
+        embedding.title += f", MDS (balance factor: {layout_param})"
         embedding.metadata["layout_method"] = "MDS"
         embedding.metadata["layout_params"]["balance factor"] = layout_param
 
@@ -613,11 +621,12 @@ def compute_kamada_kawai_layout(
     embedding: EmbeddingObj,
     partition_subgraphs: dict[int, nx.Graph],
     pairwise_dists: npt.NDArray[np.float32],
-    scale: int,
+    balance_factor: float = 0.5,
+    precomputed: dict[int, npt.NDArray[np.float32]] = None,
     boundary_neighbors: dict[int, list[int]] | None = None,
     inplace: bool = False,
     verbose: bool = False,
-) -> EmbeddingObj:
+) -> tuple[EmbeddingObj, dict[int, npt.NDArray[np.float32]]]:
     """
     4.3 Step of the modDR pipeline: Execute position-movement via Kamada Kawai-layouting.
     """
@@ -628,37 +637,74 @@ def compute_kamada_kawai_layout(
     if verbose:
         print("Start computation with Kamada Kawai-algorithm.")
 
-    node_list = list(embedding.sim_graph.nodes)
-    idx = {n: k for k, n in enumerate(node_list)}
+    # saves the original positions of the original embedding
+    original_pos_dict = embedding.embedding.copy()
 
-    for part_key, part_graph in partition_subgraphs.items():
-        subgraph_pos = {node: embedding.embedding[node] for node in part_graph.nodes}
+    # saves the updated positions after Kamada Kawai layouting (returned for precomputed positions)
+    updated_pos_dict = embedding.embedding.copy()
 
-        subdist = {
-            u: {
-                v: float(pairwise_dists[idx[u]][idx[v]])
-                for v in part_graph.neighbors(u)
+    # saves the final updated (scaled) positions after Kamada Kawai layouting
+    updated_pos_dict_scaled = embedding.embedding.copy()
+
+    if precomputed is not None:
+        updated_pos_dict = precomputed.copy()
+        updated_pos_dict_scaled.update(
+            {
+                key: precomputed[key] * balance_factor
+                + (1 - balance_factor) * original_pos_dict[key]
+                for key in updated_pos_dict
             }
-            for u in part_graph.nodes
-        }
-
-        subgraph_updated_pos = nx.kamada_kawai_layout(
-            part_graph,
-            dist=subdist,
-            pos=subgraph_pos,
-            center=embedding.partition_centers[part_key],
-            # weight="weight",
-            scale=scale,
         )
+    else:
+        for part_key, part_graph in partition_subgraphs.items():
+            if len(part_graph.nodes) == 1:
+                print(
+                    f"INFO: Skipping partition {part_key} with only {len(part_graph.nodes)} node(s) for Kamada Kawai layouting."
+                )
+                skipped_node_index = embedding.com_partition[part_key][0]
+                updated_pos_dict_scaled[skipped_node_index] = original_pos_dict[
+                    skipped_node_index
+                ]
+                continue
 
-        if boundary_neighbors is not None:
-            for boundary_node in boundary_neighbors[part_key]:
-                subgraph_updated_pos.pop(boundary_node, None)
+            subgraph_pos = {
+                node: original_pos_dict[node]
+                for node in embedding.com_partition[part_key]
+            }
 
-        embedding.embedding.update(subgraph_updated_pos)
+            subdist = {
+                u: {v: float(pairwise_dists[u][v]) for v in part_graph.neighbors(u)}
+                for u in part_graph.nodes
+            }
 
-    embedding.embedding = dict(sorted(embedding.embedding.items()))
-    return embedding
+            new_post_dict = nx.kamada_kawai_layout(
+                part_graph,
+                dist=subdist,
+                pos=subgraph_pos,
+                center=embedding.partition_centers[part_key],
+                scale=5,
+            )
+
+            if boundary_neighbors is not None:
+                for boundary_node in boundary_neighbors[part_key]:
+                    new_post_dict.pop(boundary_node, None)
+
+            updated_pos_dict.update(new_post_dict)
+
+            updated_pos_dict_scaled.update(
+                {
+                    key: new_post_dict[key] * balance_factor
+                    + (1 - balance_factor) * original_pos_dict[key]
+                    for key in new_post_dict
+                }
+            )
+
+    updated_pos_dict_scaled = dict(sorted(updated_pos_dict_scaled.items()))
+    updated_pos_dict = dict(sorted(updated_pos_dict.items()))
+
+    embedding.embedding = updated_pos_dict_scaled
+
+    return embedding, updated_pos_dict
 
 
 def compute_fruchterman_reingold_layout(
@@ -671,7 +717,7 @@ def compute_fruchterman_reingold_layout(
     verbose: bool = False,
 ) -> EmbeddingObj:
     """
-    4.3 Step of the modDR pipeline: Execute position-movement via Kamada Kawai-layouting.
+    4.3 Step of the modDR pipeline: Execute position-movement via Fruchterman-Reingold-layouting.
     """
 
     if not inplace:
