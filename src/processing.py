@@ -58,12 +58,20 @@ def run_pipeline(
         )
 
     # 2. Step: feature similarity computation
+    data_scaled = data.copy()
+    scaler = MinMaxScaler()
+
+    for col in sim_features:
+        data_scaled[col] = scaler.fit_transform(data[[col]])
+
     if layout_method == "KK" or layout_method == "MDS":
-        feat_sim = compute_pairwise_dists(data, invert=False, sim_features=sim_features)
+        feat_sim = compute_pairwise_dists(
+            data_scaled, invert=False, sim_features=sim_features
+        )
 
     if layout_method == "FR":
         feat_sim = compute_pairwise_dists(
-            data, invert=True, normalize=True, sim_features=sim_features
+            data_scaled, invert=True, normalize=True, sim_features=sim_features
         )
 
     # 3. Step: graph construction
