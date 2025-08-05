@@ -1,5 +1,6 @@
 import copy
 import time
+import warnings
 from typing import Any
 
 import leidenalg as la
@@ -28,7 +29,7 @@ def run_pipeline(
     community_resolutions: list[float] = None,
     community_resolution_amount: int = 3,
     layout_method: str = "KK",
-    boundary_neigbors: bool = False,
+    boundary_neighbors: bool = False,
     layout_params: list[int] | None = None,
     compute_metrics: bool = True,
     verbose: bool = False,
@@ -46,7 +47,7 @@ def run_pipeline(
             f"Community Detection Resolutions: {community_resolutions if community_resolutions else 'automatic'}"
         )
         print(f"Layout Method: {layout_method}")
-        print(f"Boundary Neighbors: {boundary_neigbors}")
+        print(f"Boundary Neighbors: {boundary_neighbors}")
         print(f"Layout Parameters: {layout_params if layout_params else 'default'}")
         start_time = time.time()
 
@@ -140,7 +141,7 @@ def run_pipeline(
                     modified_embedding,
                     layout_method=layout_method,
                     layout_param=param,
-                    boundary_neighbors=boundary_neigbors,
+                    boundary_neighbors=boundary_neighbors,
                     inplace=False,
                     verbose=verbose,
                 )
@@ -162,7 +163,7 @@ def run_pipeline(
                     layout_method=layout_method,
                     layout_param=param,
                     precomputed_positions=mds_positions,
-                    boundary_neighbors=boundary_neigbors,
+                    boundary_neighbors=boundary_neighbors,
                     inplace=False,
                     verbose=verbose,
                 )
@@ -184,7 +185,7 @@ def run_pipeline(
                     layout_method=layout_method,
                     layout_param=param,
                     precomputed_positions=kk_positions,
-                    boundary_neighbors=boundary_neigbors,
+                    boundary_neighbors=boundary_neighbors,
                     inplace=False,
                     verbose=verbose,
                 )
@@ -274,6 +275,12 @@ def dimensionality_reduction_umap(
     """
     1. Step of the modDR pipeline: Dimensionality Reduction.
     """
+
+    warnings.filterwarnings(
+        "ignore",
+        message="n_jobs value 1 overridden to 1 by setting random_state. Use no seed for parallelism.",
+    )
+
     reducer = umap.UMAP(
         n_neighbors=n_neighbors,
         min_dist=min_dist,
@@ -464,7 +471,7 @@ def compute_modified_positions(
         start_time = time.time()
 
     partition_subgraphs, partition_centers, partition_boundary_neighbors = (
-        compute_community_graphs(embedding, boundary_neigbors=boundary_neighbors)
+        compute_community_graphs(embedding, boundary_neighbors=boundary_neighbors)
     )
 
     embedding.partition_centers = partition_centers
@@ -585,7 +592,7 @@ def compute_distance_scaling(
 
 
 def compute_community_graphs(
-    embedding: EmbeddingObj, boundary_neigbors: bool = False
+    embedding: EmbeddingObj, boundary_neighbors: bool = False
 ) -> tuple[dict[int, nx.Graph], dict[int, tuple[float, float]], dict[int, list[Any]]]:
     partition_subgraphs = {}
     partition_centers = {}
@@ -606,11 +613,11 @@ def compute_community_graphs(
             ]
         ).copy()
 
-        if boundary_neigbors:
-            subgraph, boundary_neighbors = add_boundary_edges(
+        if boundary_neighbors:
+            subgraph, part_boundary_neighbors = add_boundary_edges(
                 embedding.sim_graph, subgraph
             )
-            partition_boundary_neighbors[part] = boundary_neighbors
+            partition_boundary_neighbors[part] = part_boundary_neighbors
 
         partition_subgraphs[part] = subgraph
 
@@ -671,6 +678,14 @@ def compute_kamada_kawai_layout(
                 node: original_pos_dict[node]
                 for node in embedding.com_partition[part_key]
             }
+
+            if boundary_neighbors is not None:
+                subgraph_pos.update(
+                    {
+                        boundary_node: original_pos_dict[boundary_node]
+                        for boundary_node in boundary_neighbors[part_key]
+                    }
+                )
 
             subdist = {
                 u: {v: float(pairwise_dists[u][v]) for v in part_graph.neighbors(u)}
@@ -808,6 +823,14 @@ def compute_mds_layout(
                 node: original_pos_dict[node]
                 for node in embedding.com_partition[part_key]
             }
+
+            if boundary_neighbors is not None:
+                subgraph_pos.update(
+                    {
+                        boundary_node: original_pos_dict[boundary_node]
+                        for boundary_node in boundary_neighbors[part_key]
+                    }
+                )
 
             subdist = pairwise_dists[
                 np.ix_(list(subgraph_pos.keys()), list(subgraph_pos.keys()))
