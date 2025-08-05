@@ -30,7 +30,7 @@ def display_graphs(
     show_title: bool = True,
     node_colors: str | None = None,
     node_labels: str | None = None,
-) -> None:
+) -> plt.Figure:
     figsize_rows = math.ceil(len(results) / figsize_columns)
     fig_width = figsize_columns * figsize[0]
     fig_height = figsize_rows * figsize[1]
@@ -56,7 +56,7 @@ def display_graphs(
             graph = results[i].sim_graph.copy()
             positions = results[i].embedding.copy()
             node_sizes = [20] * graph.number_of_nodes()
-            edge_colors = ["white"] * graph.number_of_edges()
+            edge_colors = results[i].edge_weights
 
             # add node labels (colors), if provided
             node_color_list = []
@@ -70,9 +70,6 @@ def display_graphs(
                     node_color_list = [results[i].labels[n] for n in graph.nodes()]
                 else:
                     node_color_list = ["blue"] * graph.number_of_nodes()
-
-            if show_edges:
-                edge_colors = results[i].edge_weights
 
             # add partition centers to the graph (with dedicated size, color and position)
             if show_partition_centers and results[i].partition_centers is not None:
@@ -97,8 +94,7 @@ def display_graphs(
                 node_size=node_sizes,
                 node_color=node_color_list,
                 edge_color=edge_colors,
-                edge_vmin=0,
-                edge_vmax=1,
+                edgelist=[] if not show_edges else graph.edges(),
                 width=0.4,
                 alpha=1.0,
                 edge_cmap=edge_cmap,
@@ -136,8 +132,22 @@ def display_graphs(
 
                 if cbar_labels is not None:
                     cbar.set_ticklabels(cbar_labels)
+
+            # axs[i].set_xlim(
+            #     np.array(list(positions.values()))[:, 0].min() - 1,
+            #     np.array(list(positions.values()))[:, 0].max() + 1,
+            # )
+            # axs[i].set_ylim(
+            #     np.array(list(positions.values()))[:, 1].min() - 1,
+            #     np.array(list(positions.values()))[:, 1].max() + 1,
+            # )
+            # axs[i].set_aspect("equal", adjustable="box")
+
         else:
             fig.delaxes(axs[i])
+
+    return fig
+
 
 
 def plot_community_graphs(
@@ -152,7 +162,7 @@ def plot_community_graphs(
     community_ids: list[int] | None = None,
     boundary_edges: bool = False,
     show_title: bool = True,
-) -> None:
+) -> plt.Figure:
     figsize_rows = math.ceil(len(results) / figsize_columns)
     fig_width = figsize_columns * figsize[0]
     fig_height = figsize_rows * figsize[1]
@@ -165,7 +175,7 @@ def plot_community_graphs(
     for i in range(len(axs)):
         if i < len(results):
             partition_subgraphs, _, _ = processing.compute_community_graphs(
-                results[i], boundary_neigbors=boundary_edges
+                results[i], boundary_neighbors=boundary_edges
             )
 
             graph = nx.Graph()
@@ -254,6 +264,8 @@ def plot_community_graphs(
 
         else:
             fig.delaxes(axs[i])
+
+    return fig
 
 
 def compute_shepard_curve(
@@ -380,24 +392,9 @@ def plot_metrics_report(
     sb.despine()
 
     plt.tight_layout()
-
-    if save_path:
-        plt.rcParams.update(
-            {
-                "text.usetex": True,
-                "font.family": "serif",
-                "font.serif": ["Computer Modern Roman"],
-            }
-        )
-        plt.savefig(
-            f"{save_path}.svg",
-            bbox_inches="tight",
-            dpi=300,
-            format="svg",
-            transparent=True,
-        )
-
     plt.show()
+
+    return fig
 
 
 def plot_metrics_report_plotly(data: pd.DataFrame) -> None:
@@ -432,7 +429,7 @@ def plot_pos_movements(
     community_centers: bool = False,
     plot_target_nodes: bool = False,
     show_title: bool = True,
-) -> tuple[plt.Figure, plt.Axes]:
+) -> plt.Figure:
     source_dict = dict(sorted(source.embedding.items()))
     target_dict = dict(sorted(target.embedding.items()))
 
@@ -454,8 +451,13 @@ def plot_pos_movements(
         coords_source = np.array(list(filtered_source_dict.values()))
         coords_target = np.array(list(filtered_target_dict.values()))
 
-    u = coords_target[:, 0] - coords_source[:, 0]
-    v = coords_target[:, 1] - coords_source[:, 1]
+    # shorten the vectors to avoid overlapping with target nodes
+    scale_factor = 1.0
+    if plot_target_nodes:
+        scale_factor = 0.95
+
+    u = (coords_target[:, 0] - coords_source[:, 0]) * scale_factor
+    v = (coords_target[:, 1] - coords_source[:, 1]) * scale_factor
 
     fig, ax = plt.subplots(figsize=figsize)
 
@@ -483,8 +485,8 @@ def plot_pos_movements(
             scale_units="xy",
             scale=1,
             width=0.001,
-            headwidth=4,
-            alpha=0.5,
+            headwidth=6,
+            alpha=1,
         )
     else:
         plt.quiver(
@@ -497,8 +499,8 @@ def plot_pos_movements(
             scale_units="xy",
             scale=1,
             width=0.001,
-            headwidth=4,
-            alpha=0.5,
+            headwidth=6,
+            alpha=1,
         )
 
     if community_centers:
@@ -542,7 +544,7 @@ def plot_pos_movements(
     plt.tight_layout()
     plt.show()
 
-    return fig, ax
+    return fig
 
 
 def plot_pos_movements_px(
