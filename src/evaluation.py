@@ -10,7 +10,7 @@ from scipy.stats import spearmanr
 from sklearn.neighbors import KDTree
 
 import processing
-from embedding_obj import EmbeddingObj
+from embeddingstate import EmbeddingState
 
 
 def compute_kruskal_stress(
@@ -181,14 +181,14 @@ def coranking_matrix(R1: npt.NDArray[int], R2: npt.NDArray[int]) -> npt.NDArray[
 
 def compute_global_metrics(
     highdim_df: pd.DataFrame,
-    embeddings: list[EmbeddingObj],
+    embeddings: list[EmbeddingState],
     target_features: list[str],
     fixed_k: int | None = None,
     ranking_metrics: bool = True,
     distance_metrics: bool = True,
     inplace: bool = False,
     verbose: bool = False,
-) -> list[EmbeddingObj]:
+) -> list[EmbeddingState]:
     if not inplace:
         for i, emb in enumerate(embeddings):
             embeddings[i] = copy.deepcopy(emb)
@@ -363,10 +363,10 @@ def compute_global_metrics(
 
 def compute_pairwise_metrics(
     highdim_data: npt.NDArray[np.float32],
-    embeddings: list[EmbeddingObj],
+    embeddings: list[EmbeddingState],
     inplace: bool = False,
     verbose: bool = False,
-) -> list[EmbeddingObj]:
+) -> list[EmbeddingState]:
     if not inplace:
         for i, emb in enumerate(embeddings):
             embeddings[i] = copy.deepcopy(emb)
@@ -454,7 +454,7 @@ def compute_sequence_change(
 
 
 def metric_total_score(
-    embedding_obj: EmbeddingObj,
+    embedding_obj: EmbeddingState,
     balance: float | None = 0.5,
 ) -> float:
     return (
@@ -464,7 +464,7 @@ def metric_total_score(
 
 
 def create_report(
-    embeddings: list[EmbeddingObj], metadata: bool = True, metrics: bool = True
+    embeddings: list[EmbeddingState], metadata: bool = True, metrics: bool = True
 ) -> pd.DataFrame:
     if not metadata and not metrics:
         raise ValueError("At least one of `metadata` or `metrics` must be True.")

@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Optional, TypedDict
+from typing import TypedDict
 
 import networkx as nx
 import numpy as np
@@ -26,33 +26,33 @@ class MetricsDict(TypedDict):
     rank_score: float
     distance_score: float
     total_score: float
-    coranking_matrix: Optional[npt.NDArray[np.int32]]
-    jaccard: Optional[npt.NDArray[np.float32]]
+    coranking_matrix: npt.NDArray[np.int32] | None
+    jaccard: npt.NDArray[np.float32] | None
 
 
 @dataclass
-class EmbeddingObj:
+class EmbeddingState:
     obj_id: float
     sim_graph: nx.Graph
     embedding: dict[int, npt.NDArray[np.float32]]
     edge_weights: npt.NDArray[np.float32]
     metadata: MetaDataDict
     metrics: MetricsDict
-    title: Optional[str]
+    title: str | None
 
-    com_partition: Optional[dict[int, list[int]]] = None
-    partition_centers: Optional[dict[int, npt.NDArray[np.float32]]] = None
-    labels: Optional[dict[int, float]] = None
+    com_partition: dict[int, list[int]] | None = None
+    partition_centers: dict[int, npt.NDArray[np.float32]] | None = None
+    labels: dict[int, float] | None = None
 
     def __init__(
         self,
         embedding: dict[int, npt.NDArray[np.float32]],
         edge_weights: npt.NDArray[np.float32],
-        graph: Optional[nx.Graph] = None,
-        title: Optional[str] = None,
-        obj_id: Optional[float] = None,
-        labels: Optional[dict[int, float]] = None,
-        partition_centers: Optional[dict[int, npt.NDArray[np.float32]]] = None,
+        graph: nx.Graph | None = None,
+        title: str | None = None,
+        obj_id: float | None = None,
+        labels: dict[int, float] | None = None,
+        partition_centers: dict[int, npt.NDArray[np.float32]] | None = None,
     ) -> None:
         self.sim_graph = graph
         self.embedding = embedding

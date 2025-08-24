@@ -14,11 +14,11 @@ from sklearn.isotonic import IsotonicRegression
 from sklearn.preprocessing import MinMaxScaler
 
 import processing
-from embedding_obj import EmbeddingObj
+from embeddingstate import EmbeddingState
 
 
 def display_graphs(
-    results: list[EmbeddingObj],
+    results: list[EmbeddingState],
     figsize_columns: int = 2,
     figsize: tuple[int, int] = (15, 15),
     cmap: plt.cm = plt.cm.viridis,
@@ -285,7 +285,7 @@ def compute_shepard_curve(
 
 def plot_shepard_diagram(
     highdim_df: pd.DataFrame,
-    embedding: EmbeddingObj,
+    embedding: EmbeddingState,
     target_features: list[str],
     show_stress: bool = True,
 ) -> None:
@@ -421,8 +421,8 @@ def plot_metrics_report_plotly(data: pd.DataFrame) -> None:
 
 
 def plot_pos_movements(
-    source: EmbeddingObj,
-    target: EmbeddingObj,
+    source: EmbeddingState,
+    target: EmbeddingState,
     figsize: tuple[int, int] = (15, 15),
     filtered_communities: list[int] | None = None,
     community_colors: bool = False,
@@ -548,8 +548,8 @@ def plot_pos_movements(
 
 
 def plot_pos_movements_px(
-    source: EmbeddingObj,
-    target: EmbeddingObj,
+    source: EmbeddingState,
+    target: EmbeddingState,
 ) -> None:
     x = np.array(list(source.embedding.values()))
     y = np.array(list(target.embedding.values()))

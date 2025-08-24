@@ -6,7 +6,8 @@ import networkx as nx
 import numpy as np
 import numpy.typing as npt
 
-from embedding_obj import EmbeddingObj
+import evaluation
+from embeddingstate import EmbeddingState
 
 
 def save_numpy(
@@ -39,7 +40,7 @@ def load_pickle(folderpath: str = "/interim/", filename: str = "results") -> Any
     return data
 
 
-def export_to_gexf(data: EmbeddingObj, folderpath: str = "/interim/") -> None:
+def export_to_gexf(data: EmbeddingState, folderpath: str = "/interim/") -> None:
     graph_gexf = data.sim_graph.copy()
 
     # set minimum edge weight, as gephi requires a minimum edge weight
