@@ -264,7 +264,7 @@ def plot_community_graphs(
             node_colors_dict = {}
 
             if unify_edge_colors:
-                edge_colors = ["black"] * graph.number_of_edges()
+                edge_colors = [graph.nodes[u]["community"] for u, v in graph.edges()]
             else:
                 edge_colors = list(nx.get_edge_attributes(graph, "weight").values())
 
