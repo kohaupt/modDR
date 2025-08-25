@@ -194,19 +194,11 @@ def run_pipeline(
 
     if compute_metrics:
         # 5.1 Step: compute global metrics
-        evaluation.compute_global_metrics(
+        evaluation.compute_metrics(
             data,
             embeddings,
             sim_features,
             fixed_k=reference.metadata["k_neighbors"],
-            inplace=True,
-            verbose=verbose,
-        )
-
-        # 5.2 Step: compute pairwise metrics
-        evaluation.compute_pairwise_metrics(
-            data,
-            embeddings,
             inplace=True,
             verbose=verbose,
         )
@@ -250,7 +242,7 @@ def dimensionality_reduction_param_search(
             f"Method '{method}' is not supported. Currently, only 'UMAP' is available."
         )
 
-    embeddings = evaluation.compute_global_metrics(
+    embeddings = evaluation.compute_metrics(
         data, embeddings, [], distance_metrics=False
     )
 
@@ -307,7 +299,7 @@ def dimensionality_reduction_umap(
     if not compute_metrics:
         return umap_embedding
 
-    return evaluation.compute_global_metrics(
+    return evaluation.compute_metrics(
         data, [umap_embedding], [], distance_metrics=False
     )[0]
 
