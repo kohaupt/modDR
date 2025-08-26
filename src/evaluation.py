@@ -285,7 +285,7 @@ def compute_metrics(
             emb.metrics["coranking_matrix"] = cr_matrix
 
         if distance_metrics:
-            if emb.com_partition is None:
+            if emb.partition is None:
                 # if no communities are defined, use the whole embedding as one community  # noqa: E501
                 emb.com_partition = {0: np.arange(len(emb.embedding))}
 
@@ -294,12 +294,12 @@ def compute_metrics(
             )
 
             emb.metrics["sim_stress_com"] = compute_kruskal_stress_partition(
-                dists_highdim_feat, dists_lowdim, emb.com_partition
+                dists_highdim_feat, dists_lowdim, emb.partition
             )
 
             # compute differences in community-stress
             reference_com_stress = compute_kruskal_stress_partition(
-                dists_highdim_feat, reference_lowdim, emb.com_partition
+                dists_highdim_feat, reference_lowdim, emb.partition
             )
             emb.metrics["sim_stress_com_diff"] = (
                 emb.metrics["sim_stress_com"] - reference_com_stress

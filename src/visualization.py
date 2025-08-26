@@ -66,7 +66,7 @@ def display_embeddings(
                 if embeddings[i].labels is not None:
                     node_colors = [embeddings[i].labels[n] for n in graph.nodes()]
                     print(
-                        f"INFO for embedding {embeddings[i].obj_id}:: Using labels as node colors."  # noqa: E501
+                        f"INFO for embedding {embeddings[i].obj_id}: Using labels as node colors."  # noqa: E501
                     )
                 else:
                     node_colors = [0] * graph.number_of_nodes()
@@ -223,7 +223,7 @@ def plot_community_graphs(
             graph = nx.Graph()
             positions = {}
             if only_communities and emb_community_ids is None:
-                emb_community_ids = list(embeddings[i].com_partition.keys())
+                emb_community_ids = list(embeddings[i].partition.keys())
 
             if not only_communities:
                 # add all nodes and their positions to the graph
@@ -293,7 +293,7 @@ def plot_community_graphs(
             # add partition centers to graph and positions
             if show_community_centers and embeddings[i].partition_centers is not None:
                 if emb_community_ids is None:
-                    partition_center_ids = list(embeddings[i].com_partition.keys())
+                    partition_center_ids = list(embeddings[i].partition.keys())
                 else:
                     partition_center_ids = emb_community_ids
 

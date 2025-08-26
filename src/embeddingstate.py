@@ -36,11 +36,11 @@ class EmbeddingState:
     embedding: dict[int, npt.NDArray[np.float32]]
     metadata: MetaDataDict
     metrics: MetricsDict
-    title: str | None
+    title: str
 
-    com_partition: dict[int, list[int]] | None = None
-    partition_centers: dict[int, npt.NDArray[np.float32]] | None = None
-    labels: dict[int, float] | None = None
+    partition: dict[int, list[int]]
+    partition_centers: dict[int, npt.NDArray[np.float32]]
+    labels: dict[int, float]
 
     def __init__(
         self,
@@ -48,21 +48,44 @@ class EmbeddingState:
         graph: nx.Graph | None = None,
         title: str | None = None,
         obj_id: float | None = None,
-        labels: dict[int, float] | None = None,
+        com_partition: dict[int, list[int]] | None = None,
         partition_centers: dict[int, npt.NDArray[np.float32]] | None = None,
+        labels: dict[int, float] | None = None,
     ) -> None:
-        self.graph = graph
-        self.embedding = embedding
+        if graph is None:
+            self.graph = nx.Graph()
+        else:
+            self.graph = graph
 
-        self.title = title
+        if embedding is None:
+            self.embedding = {}
+        else:
+            self.embedding = embedding
+
+        if title is None:
+            self.title = ""
+        else:
+            self.title = title
 
         if obj_id is None:
             self.obj_id = np.random.rand()
         else:
             self.obj_id = obj_id
 
-        self.labels = labels
-        self.partition_centers = partition_centers
+        if com_partition is None:
+            self.partition = {0: np.arange(len(self.embedding))}
+        else:
+            self.partition = com_partition
+
+        if partition_centers is None:
+            self.partition_centers = {}
+        else:
+            self.partition_centers = partition_centers
+
+        if labels is None:
+            self.labels = {}
+        else:
+            self.labels = labels
 
         self.metadata = MetaDataDict(
             dr_method="",
@@ -92,7 +115,7 @@ class EmbeddingState:
             "---------------------------------------\n"
             f"Embedding object (ID: {self.obj_id})\n"
             f"Title: '{self.title}'\n"
-            f"Embedding shape: {len(self.embedding.items())}\n"
+            f"Embedding shape: {len(self.embedding.items()) if self.embedding else 0}\n"
             f"Graph nodes: {self.graph.number_of_nodes() if self.graph else 0}\n"
             f"Graph edges: {self.graph.number_of_edges() if self.graph else 0}\n\n"
             f"Metadata: \n  {'\n  '.join(f'{k}: {v}' for k, v in self.metadata.items())}\n\n"  # noqa: E501

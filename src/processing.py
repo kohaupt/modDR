@@ -27,7 +27,7 @@ def run_pipeline(
     graph_method: str = "DR",
     community_resolutions: list[float] = None,
     community_resolution_amount: int = 3,
-    layout_method: str = "KK",
+    layout_method: str = "MDS",
     boundary_neighbors: bool = False,
     layout_params: list[int] | None = None,
     compute_metrics: bool = True,
@@ -39,59 +39,71 @@ def run_pipeline(
 
     if verbose:
         print("------------------------------------------------------------")
-        print("Start modDR pipeline with the following parameters:")
-        print(f"Dimensionality Reduction Method: {dr_method}")
-        print(f"Graph Construction Method: {graph_method}")
         print(
-            f"Community Detection Resolutions: {community_resolutions if community_resolutions else 'automatic'}"
+            "Start modDR pipeline with the following parameters:\n"
+            f"Similarity Features: {sim_features if sim_features else 'all features'}\n"
+            f"Dimensionality Reduction Method: {dr_method} with {dr_param_n_neigbors} neighbors\n"  # noqa: E501
+            f"Graph Construction Method: {graph_method}\n"
+            f"Community Detection Resolutions: {community_resolutions if community_resolutions else 'automatic'}\n"  # noqa: E501
+            f"Layout Method: {layout_method}\n"
+            f"Boundary Neighbors: {boundary_neighbors}\n"
+            f"Layout Parameters: {layout_params if layout_params else 'default'}\n"
+            f"Compute Metrics: {compute_metrics}\n"
         )
-        print(f"Layout Method: {layout_method}")
-        print(f"Boundary Neighbors: {boundary_neighbors}")
-        print(f"Layout Parameters: {layout_params if layout_params else 'default'}")
         start_time = time.time()
 
     # 1. Step: dimensionality reduction
     if dr_method == "UMAP":
-        reference = dimensionality_reduction_umap(
-            data, n_neighbors=dr_param_n_neigbors, compute_metrics=False
-        )
+        reference = dimensionality_reduction_umap(data, n_neighbors=dr_param_n_neigbors)
     else:
         raise ValueError(
-            f"Method '{dr_method}' is not supported. Currently, only 'UMAP' is available."
+            f"Method '{dr_method}' is not supported. Currently, only 'UMAP' is available."  # noqa: E501
         )
 
     # 2. Step: feature similarity computation
+    # Scale features to [0, 1] range to avoid higher influence of certain features
     data_scaled = data.copy()
     scaler = MinMaxScaler()
-
     for col in sim_features:
         data_scaled[col] = scaler.fit_transform(data[[col]])
 
+    # use pairwise distances for kamada kawai and mds layouts
     if layout_method == "KK" or layout_method == "MDS":
-        feat_sim = compute_pairwise_dists(
+        pairwise_sims = compute_pairwise_dists(
             data_scaled, invert=False, sim_features=sim_features
         )
-
-    if layout_method == "FR":
-        feat_sim = compute_pairwise_dists(
+    # use pairwise similarities (inversed distances) for fruchterman-reingold layout
+    elif layout_method == "FR":
+        pairwise_sims = compute_pairwise_dists(
             data_scaled, invert=True, normalize=True, sim_features=sim_features
+        )
+    else:
+        raise ValueError(
+            f"Method '{layout_method}' is not supported. Currently, only 'KK', 'MDS', and 'FR' are available."
         )
 
     # 3. Step: graph construction
-    if graph_method == "KNN":
-        reference.graph, _ = compute_knn_graph(
-            data, n_neighbors=3, sim_features=sim_features
+    # for graph_method=DR, the graph is already set (e.g. by dimensionality_reduction_umap)
+    if graph_method == "DR":
+        pass
+    elif graph_method == "KNN":
+        reference.graph, _ = compute_knn_graph(data, sim_features=sim_features)
+    else:
+        raise ValueError(
+            f"Method '{graph_method}' is not supported. Currently, only 'DR' and 'KNN' are available."
         )
 
     # 4. Step: community detection & position refinement
-    weights = [d["weight"] for _, _, d in reference.graph.edges(data=True)]
+    weights = list(nx.get_edge_attributes(reference.graph, "weight", 1).values())
     min_w, max_w = min(weights), max(weights)
 
     if community_resolutions is None:
+        # compute equidistant community resolutions between min_w and max_w
         community_resolutions = np.linspace(
             start=min_w, stop=max_w, num=community_resolution_amount
         )
 
+        # apply padding to avoid extreme resolutions
         range_w = max_w - min_w
         padding = range_w * 0.05
 
@@ -102,7 +114,7 @@ def run_pipeline(
 
         if verbose:
             print(
-                f"Using the following community resolutions: {community_resolutions} (min: {min_w}, max: {max_w})."
+                f"Using the following community resolutions (min: {min_w}, max: {max_w}): {community_resolutions}."
             )
 
     if min_w > min(community_resolutions) or max_w < max(community_resolutions):
@@ -111,85 +123,99 @@ def run_pipeline(
         )
 
     # set the community partition for the reference embedding to avoid errors
-    reference.com_partition = {0: np.arange(len(reference.embedding))}
     nx.set_node_attributes(reference.graph, 0, "community")
-
     reference.obj_id = 0
     embeddings = [reference]
 
+    # gets increased after each new created embedding
     id_counter = 1
+
     for resolution in community_resolutions:
-        community_embedding = com_detection_leiden(
-            reference, resolution_parameter=resolution, inplace=False, verbose=verbose
+        # compute the partition for the current resolution
+        partition_embedding = community_detection_leiden(
+            reference, resolution_parameter=resolution, verbose=verbose
         )
 
-        assign_graph_edge_weights(
-            community_embedding, feat_sim, inplace=True, verbose=verbose
-        )
-
+        # for FR layout, iterate over iteration parameters in layout_params
         if layout_method == "FR":
             if layout_params is None:
-                layout_params = [10]
+                layout_params = [1, 10, 100, 1000]
+            elif not all(isinstance(x, int) and x >= 0 for x in layout_params):
+                raise ValueError(
+                    "Iterations for the FR-algorithm must be positive integers."
+                )
 
             for param in layout_params:
-                modified_embedding = copy.deepcopy(community_embedding)
+                # use partition_embedding as a starting point of each modification
+                modified_embedding = copy.deepcopy(partition_embedding)
                 modified_embedding.obj_id = id_counter
-                id_counter += 1
 
                 modified_embedding, _ = compute_modified_positions(
                     modified_embedding,
+                    target_dists=pairwise_sims,
                     layout_method=layout_method,
                     layout_param=param,
                     boundary_neighbors=boundary_neighbors,
-                    inplace=False,
                     verbose=verbose,
                 )
                 embeddings.append(modified_embedding)
-
-        elif layout_method == "MDS":
-            if layout_params is None:
-                layout_params = [0.5]
-
-            mds_positions = None
-            for param in layout_params:
-                modified_embedding = copy.deepcopy(community_embedding)
-                modified_embedding.obj_id = id_counter
                 id_counter += 1
 
-                modified_embedding, mds_positions = compute_modified_positions(
-                    modified_embedding,
-                    target_dists=feat_sim,
-                    layout_method=layout_method,
-                    layout_param=param,
-                    precomputed_positions=mds_positions,
-                    boundary_neighbors=boundary_neighbors,
-                    inplace=False,
-                    verbose=verbose,
-                )
-                embeddings.append(modified_embedding)
-
-        elif layout_method == "KK":
+        # for MDS & KK-layout, iterate over balance factors in layout_params
+        elif layout_method == "MDS" or layout_method == "KK":
             if layout_params is None:
-                layout_params = [0.5]
+                layout_params = [0.2, 0.4, 0.6, 0.8, 1.0]
+            elif not all(0 <= x <= 1 for x in layout_params):
+                raise ValueError("The balance factors must be between 0 and 1.")
 
-            kk_positions = None
-            for param in layout_params:
-                modified_embedding = copy.deepcopy(community_embedding)
+            # use partition_embedding as a starting point
+            modified_embedding = copy.deepcopy(partition_embedding)
+            modified_embedding.obj_id = id_counter
+
+            # saves full modified positions for future balance factors
+            full_modified_positions = None
+
+            # compute modification for first balance factor
+            # also saves full modified positions (balance factor=1) for future use
+            modified_embedding, full_modified_positions = compute_modified_positions(
+                modified_embedding,
+                target_dists=pairwise_sims,
+                layout_method=layout_method,
+                layout_param=layout_params[0],
+                boundary_neighbors=boundary_neighbors,
+                verbose=verbose,
+            )
+            embeddings.append(modified_embedding)
+            id_counter += 1
+
+            # for all other balance factors, use the precomputed positions
+            for param in layout_params[1:]:
+                # use partition_embedding as a starting point of each modification
+                modified_embedding = copy.deepcopy(partition_embedding)
                 modified_embedding.obj_id = id_counter
+
+                modified_embedding = apply_balance_factor(
+                    modified_embedding, full_modified_positions, param, verbose=verbose
+                )
+
+                # set metadata accordingly, as they aren't already set by compute_modified_positions()
+                modified_embedding.title += (
+                    f", {layout_method} (balance factor: {param})"
+                )
+                modified_embedding.metadata["layout_method"] = layout_method
+                modified_embedding.metadata["layout_params"]["boundary_neighbors"] = (
+                    boundary_neighbors
+                )
+                if boundary_neighbors:
+                    modified_embedding.title += ", boundary edges added"
+
+                embeddings.append(modified_embedding)
                 id_counter += 1
 
-                modified_embedding, kk_positions = compute_modified_positions(
-                    modified_embedding,
-                    target_dists=feat_sim,
-                    layout_method=layout_method,
-                    layout_param=param,
-                    precomputed_positions=kk_positions,
-                    boundary_neighbors=boundary_neighbors,
-                    inplace=False,
-                    verbose=verbose,
-                )
-
-                embeddings.append(modified_embedding)
+        else:
+            raise ValueError(
+                f"Method '{layout_method}' is not supported. Currently, only 'FR', 'MDS' and 'KK' are available."
+            )
 
     if compute_metrics:
         # 5.1 Step: compute global metrics
@@ -384,9 +410,9 @@ def assign_graph_edge_weights(
     return embedding
 
 
-def com_detection_leiden(
+def community_detection_leiden(
     embedding: EmbeddingState,
-    resolution_parameter: float = 0.001,
+    resolution_parameter: float,
     inplace: bool = False,
     verbose: bool = False,
 ) -> EmbeddingState:
@@ -397,31 +423,33 @@ def com_detection_leiden(
     if verbose:
         print("------------------------------------------------------------")
         print(
-            f"Computing communities via Leiden detection for embedding: `{embedding.title}' with resolution '{resolution_parameter}'."
+            f"Computing communities via Leiden detection for embedding {embedding.obj_id}: "
+            f"`{embedding.title}' with resolution '{resolution_parameter}'."
         )
         start_time = time.time()
 
     if not inplace:
         embedding = copy.deepcopy(embedding)
 
-    g_ig = Graph.from_networkx(embedding.graph)
-
+    # use igraph for community detection, as networkx does not support a native implementation of the Leiden algorithm
+    graph_igraph = Graph.from_networkx(embedding.graph)
     partition = la.find_partition(
-        g_ig,
+        graph_igraph,
         la.CPMVertexPartition,
         weights="weight",
         resolution_parameter=resolution_parameter,
     )
 
-    comm_dict = {}
-
+    # build partition dictionary and set community attribute for each node in the graph
+    partition_dict = {}
     for i, community in enumerate(partition):
-        comm_dict[i] = community
+        partition_dict[i] = community
 
         for node in community:
-            embedding.graph.nodes[g_ig.vs[node]["_nx_name"]]["community"] = i
+            embedding.graph.nodes[graph_igraph.vs[node]["_nx_name"]]["community"] = i
 
-    embedding.com_partition = comm_dict
+    # update embedding metadata
+    embedding.partition = partition_dict
     embedding.title = embedding.title + f", Leiden (resolution: {resolution_parameter})"
     embedding.metadata["com_detection"] = "Leiden"
     embedding.metadata["com_detection_params"]["resolution"] = resolution_parameter
@@ -435,6 +463,52 @@ def com_detection_leiden(
     return embedding
 
 
+def apply_balance_factor(
+    embedding: EmbeddingState,
+    modified_positions: npt.NDArray[np.float32],
+    balance_factor: float,
+    inplace: bool = False,
+    verbose: bool = False,
+) -> EmbeddingState:
+    """
+    Apply a balance factor to the embedding positions.
+    """
+
+    if verbose:
+        print(
+            f"Applying balance factor {balance_factor} for embedding: `{embedding.title}'."
+        )
+
+    if embedding.embedding is None:
+        raise ValueError("Embedding object must have an embedding.")
+
+    if not inplace:
+        embedding = copy.deepcopy(embedding)
+
+    if modified_positions is None:
+        raise ValueError("Modified positions must be provided.")
+
+    if len(embedding.embedding) != len(modified_positions):
+        raise ValueError(
+            "Modified positions must have the same length as the embedding."
+        )
+
+    if not (0 <= balance_factor <= 1):
+        raise ValueError("Balance factor must be between 0 and 1.")
+
+    embedding.embedding.update(
+        {
+            key: (1 - balance_factor) * embedding.embedding[key]
+            + modified_positions[key] * balance_factor
+            for key in embedding.embedding
+        }
+    )
+
+    embedding.metadata["layout_params"]["balance factor"] = balance_factor
+
+    return embedding
+
+
 def compute_modified_positions(
     embedding: EmbeddingState,
     layout_param: int | float,
@@ -442,7 +516,6 @@ def compute_modified_positions(
     layout_scale: int = 1,
     boundary_neighbors: bool = False,
     target_dists: npt.NDArray[np.float32] | None = None,
-    precomputed_positions: dict[int, npt.NDArray[np.float32]] | None = None,
     inplace: bool = False,
     verbose: bool = False,
 ) -> tuple[EmbeddingState, npt.NDArray[np.float32]]:
@@ -458,17 +531,20 @@ def compute_modified_positions(
         print(f"Compute new positions for embedding: `{embedding.title}'.")
         start_time = time.time()
 
+    # compute community graphs based on given partition from embedding
     partition_subgraphs, partition_centers, partition_boundary_neighbors = (
         compute_community_graphs(embedding, boundary_neighbors=boundary_neighbors)
     )
-
     embedding.partition_centers = partition_centers
+
+    # safes modified positions w/o balance factor influence (i.e. balance factor=1)
     computed_positions = None
 
-    if layout_method == "KK":
+    # scale pairwise distances for layout methods which are based on target_dists
+    if layout_method == "KK" or layout_method == "MDS":
         if target_dists is None:
             raise ValueError(
-                "Pairwise distances must be provided for Kamada Kawai layouting."
+                "Pairwise distances must be provided for Kamada Kawai or MDS layouting."
             )
 
         embedding_df = pd.DataFrame(embedding.embedding.values(), index=None)
@@ -482,16 +558,15 @@ def compute_modified_positions(
         )
         target_dists = target_dists * target_scaling
 
-        _, computed_positions = compute_kamada_kawai_layout(
+    if layout_method == "KK":
+        embedding, computed_positions = compute_kamada_kawai_layout(
             embedding,
             partition_subgraphs,
             target_dists,
             balance_factor=layout_param,
-            precomputed=precomputed_positions,
             boundary_neighbors=partition_boundary_neighbors
             if boundary_neighbors
             else None,
-            inplace=True,
             verbose=verbose,
         )
 
@@ -500,30 +575,14 @@ def compute_modified_positions(
         embedding.metadata["layout_params"]["balance factor"] = layout_param
 
     elif layout_method == "MDS":
-        if target_dists is None:
-            raise ValueError("Pairwise distances must be provided for MDS layouting.")
-
-        embedding_df = pd.DataFrame(embedding.embedding.values(), index=None)
-        embedding_dists = compute_pairwise_dists(
-            embedding_df,
-            apply_squareform=False,
-        )
-
-        target_scaling = compute_distance_scaling(
-            embedding_dists, squareform(target_dists)
-        )
-        target_dists = target_dists * target_scaling
-
-        _, computed_positions = compute_mds_layout(
+        embedding, computed_positions = compute_mds_layout(
             embedding,
             partition_subgraphs,
             target_dists,
             balance_factor=layout_param,
-            precomputed=precomputed_positions,
             boundary_neighbors=partition_boundary_neighbors
             if boundary_neighbors
             else None,
-            inplace=True,
             verbose=verbose,
         )
 
@@ -532,7 +591,7 @@ def compute_modified_positions(
         embedding.metadata["layout_params"]["balance factor"] = layout_param
 
     elif layout_method == "FR":
-        compute_fruchterman_reingold_layout(
+        embedding = compute_fruchterman_reingold_layout(
             embedding,
             partition_subgraphs,
             scale=layout_scale,
@@ -540,7 +599,6 @@ def compute_modified_positions(
             boundary_neighbors=partition_boundary_neighbors
             if boundary_neighbors
             else None,
-            inplace=True,
             verbose=verbose,
         )
 
@@ -550,7 +608,7 @@ def compute_modified_positions(
 
     else:
         raise ValueError(
-            f"Layout method '{layout_method}' is not supported. Currently, only 'KK' (Kamada Kawai) and 'FR' (Fruchterman-Reingold) are available."
+            f"Method '{layout_method}' is not supported. Currently, only 'FR', 'MDS' and 'KK' are available."
         )
 
     if verbose:
@@ -568,14 +626,27 @@ def compute_modified_positions(
 
 
 def compute_distance_scaling(
-    highdim_dists: npt.NDArray[np.float32], lowdim_dists: npt.NDArray[np.float32]
+    dists_highdim: npt.NDArray[np.float32], dists_lowdim: npt.NDArray[np.float32]
 ) -> float:
-    if not highdim_dists.any():
+    if dists_highdim.shape != dists_lowdim.shape:
+        raise ValueError(
+            f"Shape mismatch (dists_highdim.shape={dists_highdim.shape}, dists_lowdim.shape={dists_lowdim.shape}): "  # noqa: E501
+            f"Both arrays must have the same shape."
+        )
+
+    # convert to vector form if necessary as distances must not be used more than once
+    if dists_highdim.ndim != 1:
+        dists_highdim = squareform(dists_highdim)
+
+    if dists_lowdim.ndim != 1:
+        dists_lowdim = squareform(dists_lowdim)
+
+    if not dists_highdim.any():
         print("WARNING: Highdim distances are all 0. Returning 1 as scaling factor.")
         return 1.0
 
-    numerator = np.dot(highdim_dists, lowdim_dists)
-    denominator = np.dot(lowdim_dists, lowdim_dists)
+    numerator = np.dot(dists_highdim, dists_lowdim)
+    denominator = np.dot(dists_lowdim, dists_lowdim)
     return numerator / denominator
 
 
@@ -586,11 +657,9 @@ def compute_community_graphs(
     partition_centers = {}
     partition_boundary_neighbors = {}
 
-    for part, nodes in embedding.com_partition.items():
+    for part, nodes in embedding.partition.items():
+        # partition centers are based on median rather than min/max to avoid distortion from outliers
         subgraph_points_coords = np.array([embedding.embedding[i] for i in nodes])
-        # min_x, min_y = subgraph_points_coords.min(axis=0)
-        # max_x, max_y = subgraph_points_coords.max(axis=0)
-        # partition_centers[part] = ((min_x + max_x) / 2, (min_y + max_y) / 2)
         partition_centers[part] = np.median(subgraph_points_coords, axis=0)
 
         subgraph = embedding.graph.subgraph(
@@ -617,7 +686,6 @@ def compute_kamada_kawai_layout(
     partition_subgraphs: dict[int, nx.Graph],
     pairwise_dists: npt.NDArray[np.float32],
     balance_factor: float = 0.5,
-    precomputed: dict[int, npt.NDArray[np.float32]] = None,
     boundary_neighbors: dict[int, list[int]] | None = None,
     inplace: bool = False,
     verbose: bool = False,
@@ -641,66 +709,150 @@ def compute_kamada_kawai_layout(
     # saves the final updated (scaled) positions after Kamada Kawai layouting
     updated_pos_dict_scaled = embedding.embedding.copy()
 
-    if precomputed is not None:
-        updated_pos_dict = precomputed.copy()
-        updated_pos_dict_scaled.update(
-            {
-                key: precomputed[key] * balance_factor
-                + (1 - balance_factor) * original_pos_dict[key]
-                for key in updated_pos_dict
-            }
-        )
-    else:
-        for part_key, part_graph in partition_subgraphs.items():
-            if len(part_graph.nodes) == 1:
-                print(
-                    f"INFO: Skipping partition {part_key} with only {len(part_graph.nodes)} node(s) for Kamada Kawai layouting."
-                )
-                skipped_node_index = embedding.com_partition[part_key][0]
-                updated_pos_dict_scaled[skipped_node_index] = original_pos_dict[
-                    skipped_node_index
-                ]
-                continue
-
-            subgraph_pos = {
-                node: original_pos_dict[node]
-                for node in embedding.com_partition[part_key]
-            }
-
-            if boundary_neighbors is not None:
-                subgraph_pos.update(
-                    {
-                        boundary_node: original_pos_dict[boundary_node]
-                        for boundary_node in boundary_neighbors[part_key]
-                    }
-                )
-
-            subdist = {
-                u: {v: float(pairwise_dists[u][v]) for v in part_graph.neighbors(u)}
-                for u in part_graph.nodes
-            }
-
-            new_post_dict = nx.kamada_kawai_layout(
-                part_graph,
-                dist=subdist,
-                pos=subgraph_pos,
-                center=embedding.partition_centers[part_key],
-                scale=5,
+    for part_key, part_graph in partition_subgraphs.items():
+        if len(part_graph.nodes) == 1:
+            print(
+                f"INFO: Skipping partition {part_key} with only {len(part_graph.nodes)} node(s) for Kamada Kawai layouting."
             )
+            skipped_node_index = embedding.partition[part_key][0]
+            updated_pos_dict_scaled[skipped_node_index] = original_pos_dict[
+                skipped_node_index
+            ]
+            continue
 
-            if boundary_neighbors is not None:
-                for boundary_node in boundary_neighbors[part_key]:
-                    new_post_dict.pop(boundary_node, None)
+        subgraph_pos = {
+            node: original_pos_dict[node] for node in embedding.partition[part_key]
+        }
 
-            updated_pos_dict.update(new_post_dict)
-
-            updated_pos_dict_scaled.update(
+        if boundary_neighbors is not None:
+            subgraph_pos.update(
                 {
-                    key: new_post_dict[key] * balance_factor
-                    + (1 - balance_factor) * original_pos_dict[key]
-                    for key in new_post_dict
+                    boundary_node: original_pos_dict[boundary_node]
+                    for boundary_node in boundary_neighbors[part_key]
                 }
             )
+
+        subdist = {
+            u: {v: float(pairwise_dists[u][v]) for v in part_graph.neighbors(u)}
+            for u in part_graph.nodes
+        }
+
+        new_post_dict = nx.kamada_kawai_layout(
+            part_graph,
+            dist=subdist,
+            pos=subgraph_pos,
+            center=embedding.partition_centers[part_key],
+            scale=5,
+        )
+
+        if boundary_neighbors is not None:
+            for boundary_node in boundary_neighbors[part_key]:
+                new_post_dict.pop(boundary_node, None)
+
+        updated_pos_dict.update(new_post_dict)
+
+        updated_pos_dict_scaled.update(
+            {
+                key: (1 - balance_factor) * original_pos_dict[key]
+                + new_post_dict[key] * balance_factor
+                for key in new_post_dict
+            }
+        )
+
+    updated_pos_dict_scaled = dict(sorted(updated_pos_dict_scaled.items()))
+    updated_pos_dict = dict(sorted(updated_pos_dict.items()))
+
+    embedding.embedding = updated_pos_dict_scaled
+
+    return embedding
+
+
+def compute_mds_layout(
+    embedding: EmbeddingState,
+    partition_subgraphs: dict[int, nx.Graph],
+    pairwise_dists: npt.NDArray[np.float32],
+    balance_factor: float = 0.5,
+    boundary_neighbors: dict[int, list[int]] | None = None,
+    inplace: bool = False,
+    verbose: bool = False,
+) -> tuple[EmbeddingState, dict[int, npt.NDArray[np.float32]]]:
+    """
+    4.3 Step of the modDR pipeline: Execute position-movement via Kamada Kawai-layouting.
+    """
+
+    if not inplace:
+        embedding = copy.deepcopy(embedding)
+
+    if verbose:
+        print("Start computation with MDS-algorithm.")
+
+    # saves the original positions of the original embedding
+    original_pos_dict = embedding.embedding.copy()
+
+    # saves the updated positions after MDS layouting (returned for precomputed positions)
+    updated_pos_dict = embedding.embedding.copy()
+
+    # saves the final updated (scaled) positions after MDS layouting
+    updated_pos_dict_scaled = embedding.embedding.copy()
+
+    for part_key, part_graph in partition_subgraphs.items():
+        if len(part_graph.nodes) == 1:
+            print(
+                f"INFO: Skipping partition {part_key} with only {len(part_graph.nodes)} node(s) for MDS layouting."
+            )
+            skipped_node_index = embedding.partition[part_key][0]
+            updated_pos_dict_scaled[skipped_node_index] = original_pos_dict[
+                skipped_node_index
+            ]
+            continue
+
+        subgraph_pos = {
+            node: original_pos_dict[node] for node in embedding.partition[part_key]
+        }
+
+        if boundary_neighbors is not None:
+            subgraph_pos.update(
+                {
+                    boundary_node: original_pos_dict[boundary_node]
+                    for boundary_node in boundary_neighbors[part_key]
+                }
+            )
+
+        subdist = pairwise_dists[
+            np.ix_(list(subgraph_pos.keys()), list(subgraph_pos.keys()))
+        ]
+
+        mds = MDS(
+            n_components=2,
+            dissimilarity="precomputed",
+            metric=True,
+            normalized_stress="auto",
+            max_iter=1000,
+            eps=1e-9,
+            n_init=1,
+        )
+
+        new_pos = mds.fit(
+            subdist, init=np.array(list(subgraph_pos.values()))
+        ).embedding_
+
+        # shift new positions by partition center
+        new_pos += embedding.partition_centers[part_key]
+        new_post_dict = {node: new_pos[i] for i, node in enumerate(subgraph_pos)}
+
+        if boundary_neighbors is not None:
+            for boundary_node in boundary_neighbors[part_key]:
+                new_post_dict.pop(boundary_node, None)
+
+        updated_pos_dict.update(new_post_dict)
+
+        updated_pos_dict_scaled.update(
+            {
+                key: (1 - balance_factor) * original_pos_dict[key]
+                + new_post_dict[key] * balance_factor
+                for key in new_post_dict
+            }
+        )
 
     updated_pos_dict_scaled = dict(sorted(updated_pos_dict_scaled.items()))
     updated_pos_dict = dict(sorted(updated_pos_dict.items()))
@@ -713,6 +865,7 @@ def compute_kamada_kawai_layout(
 def compute_fruchterman_reingold_layout(
     embedding: EmbeddingState,
     partition_subgraphs: dict[int, nx.Graph],
+    pairwise_sims: npt.NDArray[np.float32],
     scale: int,
     iterations: int,
     boundary_neighbors: dict[int, list[int]] | None = None,
@@ -728,6 +881,9 @@ def compute_fruchterman_reingold_layout(
 
     if verbose:
         print("Start computation with Fruchterman-Reingold-algorithm.")
+
+    # assign edge weights to pairwise feature similarities
+    assign_graph_edge_weights(embedding, pairwise_sims, inplace=True, verbose=verbose)
 
     for part_key, part_graph in partition_subgraphs.items():
         subgraph_pos = {node: embedding.embedding[node] for node in part_graph.nodes}
@@ -757,631 +913,19 @@ def compute_fruchterman_reingold_layout(
     return embedding
 
 
-def compute_mds_layout(
-    embedding: EmbeddingState,
-    partition_subgraphs: dict[int, nx.Graph],
-    pairwise_dists: npt.NDArray[np.float32],
-    balance_factor: float = 0.5,
-    precomputed: dict[int, npt.NDArray[np.float32]] = None,
-    boundary_neighbors: dict[int, list[int]] | None = None,
-    inplace: bool = False,
-    verbose: bool = False,
-) -> tuple[EmbeddingState, dict[int, npt.NDArray[np.float32]]]:
-    """
-    4.3 Step of the modDR pipeline: Execute position-movement via Kamada Kawai-layouting.
-    """
-
-    if not inplace:
-        embedding = copy.deepcopy(embedding)
-
-    if verbose:
-        print("Start computation with MDS-algorithm.")
-
-    # saves the original positions of the original embedding
-    original_pos_dict = embedding.embedding.copy()
-
-    # saves the updated positions after MDS layouting (returned for precomputed positions)
-    updated_pos_dict = embedding.embedding.copy()
-
-    # saves the final updated (scaled) positions after MDS layouting
-    updated_pos_dict_scaled = embedding.embedding.copy()
-
-    if precomputed is not None:
-        updated_pos_dict = precomputed.copy()
-        updated_pos_dict_scaled.update(
-            {
-                key: precomputed[key] * balance_factor
-                + (1 - balance_factor) * original_pos_dict[key]
-                for key in updated_pos_dict
-            }
-        )
-    else:
-        for part_key, part_graph in partition_subgraphs.items():
-            if len(part_graph.nodes) == 1:
-                print(
-                    f"INFO: Skipping partition {part_key} with only {len(part_graph.nodes)} node(s) for MDS layouting."
-                )
-                skipped_node_index = embedding.com_partition[part_key][0]
-                updated_pos_dict_scaled[skipped_node_index] = original_pos_dict[
-                    skipped_node_index
-                ]
-                continue
-
-            subgraph_pos = {
-                node: original_pos_dict[node]
-                for node in embedding.com_partition[part_key]
-            }
-
-            if boundary_neighbors is not None:
-                subgraph_pos.update(
-                    {
-                        boundary_node: original_pos_dict[boundary_node]
-                        for boundary_node in boundary_neighbors[part_key]
-                    }
-                )
-
-            subdist = pairwise_dists[
-                np.ix_(list(subgraph_pos.keys()), list(subgraph_pos.keys()))
-            ]
-
-            mds = MDS(
-                n_components=2,
-                dissimilarity="precomputed",
-                metric=True,
-                normalized_stress="auto",
-                max_iter=1000,
-                eps=1e-9,
-                n_init=1,
-            )
-
-            new_pos = mds.fit(
-                subdist, init=np.array(list(subgraph_pos.values()))
-            ).embedding_
-
-            new_pos += embedding.partition_centers[part_key]
-            new_post_dict = {node: new_pos[i] for i, node in enumerate(subgraph_pos)}
-
-            if boundary_neighbors is not None:
-                for boundary_node in boundary_neighbors[part_key]:
-                    new_post_dict.pop(boundary_node, None)
-
-            updated_pos_dict.update(new_post_dict)
-
-            updated_pos_dict_scaled.update(
-                {
-                    key: new_post_dict[key] * balance_factor
-                    + (1 - balance_factor) * original_pos_dict[key]
-                    for key in new_post_dict
-                }
-            )
-
-    updated_pos_dict_scaled = dict(sorted(updated_pos_dict_scaled.items()))
-    updated_pos_dict = dict(sorted(updated_pos_dict.items()))
-
-    embedding.embedding = updated_pos_dict_scaled
-
-    return embedding, updated_pos_dict
-
-
-def deprecated_compute_kamada_kawai_layout(
-    graph: nx.Graph,
-    embedding_dict: dict[int, npt.NDArray[np.float32]],
-    partition_centers: dict[int, npt.NDArray[np.float32]],
-    partition_subgraphs: dict[int, nx.Graph],
-    partition_dict: dict[int, float],
-    level: int,
-    threshold: float | None = None,
-    mst: bool = False,
-    boundary_edges: bool = False,
-    pairwise_dists: npt.NDArray[np.float32] | None = None,
-) -> EmbeddingState:
-    modified_embedding_dict = embedding_dict.copy()
-
-    node_list = list(graph.nodes)
-
-    pairwise_dists_dict = {
-        node_list[i]: {
-            node_list[j]: pairwise_dists[i][j] for j in range(len(node_list)) if i != j
-        }
-        for i in range(len(node_list))
-    }
-
-    print("------------------------------------------------------------")
-    print(
-        f"Computing modified embedding via Kamada Kawai-layouting at level {level + 1}"
-    )
-    start_time = time.time()
-
-    for part_key, part_graph in partition_subgraphs.items():
-        subgraph_pos = {node: embedding_dict[node] for node in part_graph.nodes}
-
-        subgraph_updated_pos = nx.kamada_kawai_layout(
-            part_graph,
-            dist=pairwise_dists_dict,
-            pos=subgraph_pos,
-            center=partition_centers[part_key],
-            weight=None,
-            scale=6.0,
-        )
-
-        for node in part_graph.nodes():
-            modified_embedding_dict[node] = subgraph_updated_pos[node]
-
-    emb = EmbeddingState(
-        graph,
-        modified_embedding_dict,
-        np.array([]),
-        labels=partition_dict,
-        partition_centers=partition_centers,
-    )
-
-    emb.com_partition = partition_dict
-
-    # TODO: add unique-id generation
-    emb.obj_id = level + 1
-    emb.title = f"Positions after Kamada Kawai-layouting at level {level + 1}"
-
-    if boundary_edges:
-        emb.title += ", boundary edges added"
-
-    if threshold is not None:
-        emb.title += f", edge-weight threshold: {threshold}"
-
-    if mst:
-        emb.title += ", MST-edges used"
-
-    end_time = time.time()
-    print(f"Computation finished after {end_time - start_time:.2f} seconds")
-    print("------------------------------------------------------------")
-
-    return emb
-
-
-def generate_pairwise_threshold_graphs(
-    similarity_matrix: npt.NDArray[np.float32], threshold: float
-) -> tuple[nx.Graph, list[dict[str, Any]]]:
-    for i in range(len(similarity_matrix)):
-        similarity_matrix[i] = [
-            x if x >= threshold else 0 for x in similarity_matrix[i]
-        ]
-
-    graph_thresholded = nx.Graph(similarity_matrix)
-    edge_weights = [
-        graph_thresholded[u][v]["weight"] for u, v in graph_thresholded.edges()
-    ]
-    return graph_thresholded, edge_weights
-
-
-def compute_force_directed(
-    graph: nx.Graph, initial_pos: npt.NDArray[np.float32], iterations: list[int]
-) -> list[EmbeddingState]:
-    embeddings = []
-    embedding_dict = {i: initial_pos[i] for i in range(len(initial_pos))}
-
-    initial_emb = EmbeddingState(graph, embedding_dict, np.array([]))
-
-    initial_emb.obj_id = 0
-    initial_emb.title = "Initial positions"
-    embeddings.append(initial_emb)
-
-    for iteration in iterations:
-        print("------------------------------------------------------------")
-        print("Computing modified embedding for iteration: ", iteration)
-
-        pos_dict = nx.spring_layout(
-            graph,
-            pos=embedding_dict,
-            iterations=iteration,
-            threshold=0.0001,
-        )
-
-        emb = EmbeddingState(graph, pos_dict, np.array([]))
-
-        emb.obj_id = iteration
-        emb.title = "Position after " + str(iteration) + " iterations"
-        embeddings.append(emb)
-
-        print("Computation finished")
-        print("------------------------------------------------------------")
-
-    return embeddings
-
-
-def compute_local_force_directed(
-    graph: nx.Graph,
-    initial_pos: npt.NDArray[np.float32],
-    iterations: list[int],
-    threshold: float | None = None,
-    mst: bool = False,
-    boundary_edges: bool = False,
-    method: str = "kawai",
-    pairwise_dists: npt.NDArray[np.float32] | None = None,
-) -> tuple[list[EmbeddingState], dict[int, int]]:
-    partition_dict = community_louvain.best_partition(graph, random_state=0)
-
-    # remove edges with weight (similarity) smaller than the threshold
-    if threshold is not None:
-        graph_trimmed = graph.copy()
-        for u, v, w in graph.edges.data("weight"):
-            if w < threshold:
-                graph_trimmed.remove_edge(u, v)
-
-        graph = graph_trimmed
-
-    embeddings = []
-    embedding_dict = {i: initial_pos[i] for i in range(len(initial_pos))}
-    partition_values = set(partition_dict.values())
-
-    partition_centers = {}
-    partition_subgraphs = {}
-    partition_boundary_neighbors = {}
-    mod_graph = nx.Graph()
-
-    # compute center-coordinates (bounding box) of each partition used in force-directed layout
-    for partition in partition_values:
-        subgraph_points = [k for k, v in partition_dict.items() if v == partition]
-        subgraph_points_coords = np.array([initial_pos[i] for i in subgraph_points])
-        min_x, min_y = subgraph_points_coords.min(axis=0)
-        max_x, max_y = subgraph_points_coords.max(axis=0)
-        partition_centers[partition] = ((min_x + max_x) / 2, (min_y + max_y) / 2)
-
-        subgraph = graph.subgraph(
-            [node for node, part in partition_dict.items() if part == partition]
-        ).copy()
-
-        # TODO: Check if this is alternative subgraph computation is needed
-        # subgraph_nodes = [
-        #     node for node, part in partition_dict.items() if part == partition
-        # ]
-        # subgraph = nx.Graph()
-        # subgraph.add_nodes_from(subgraph_nodes)
-        #
-        # for u, v in graph.edges():
-        #     if u in subgraph_nodes and v in subgraph_nodes:
-        #         subgraph.add_edge(u, v, weight=graph[u][v]["weight"])
-
-        if boundary_edges:
-            subgraph, boundary_neighbors = add_boundary_edges(subgraph, subgraph)
-            partition_boundary_neighbors[partition] = boundary_neighbors
-
-        if mst:
-            subgraph = compute_mst(subgraph)
-
-        partition_subgraphs[partition] = subgraph
-
-        mod_graph.add_nodes_from(subgraph.nodes())
-        mod_graph.add_edges_from(subgraph.edges(data=True))
-
-    initial_emb = EmbeddingState(
-        mod_graph,
-        embedding_dict,
-        np.array([]),
-        labels=partition_dict,
-        partition_centers=partition_centers,
-    )
-
-    initial_emb.obj_id = 0
-    initial_emb.title = "Initial positions"
-    embeddings.append(initial_emb)
-
-    if method == "fr":
-        embeddings += compute_spring_electrical_layout(
-            graph.copy(),
-            embedding_dict.copy(),
-            partition_centers,
-            iterations,
-            partition_subgraphs,
-            partition_dict,
-            partition_boundary_neighbors,
-            threshold=threshold,
-            mst=mst,
-            boundary_edges=boundary_edges,
-        )
-    elif method == "kawai":
-        embeddings += [
-            deprecated_compute_kamada_kawai_layout(
-                graph.copy(),
-                embedding_dict.copy(),
-                partition_centers,
-                partition_subgraphs,
-                partition_dict,
-                level=0,
-                threshold=threshold,
-                mst=mst,
-                boundary_edges=boundary_edges,
-                pairwise_dists=pairwise_dists,
-            )
-        ]
-
-    return embeddings, partition_dict
-
-
-def compute_multilevel_dr(
-    graph: nx.Graph,
-    initial_pos: npt.NDArray[np.float32],
-    pairwise_dists: npt.NDArray[np.float32],
-    mst: bool = False,
-    boundary_edges: bool = False,
-    threshold: float | None = None,
-) -> list[EmbeddingState]:
-    dendrogram = community_louvain.generate_dendrogram(graph, random_state=0)
-
-    # remove edges with weight (similarity) smaller than the threshold
-    if threshold is not None:
-        graph_trimmed = graph.copy()
-        for u, v, w in graph.edges.data("weight"):
-            if w < threshold:
-                graph_trimmed.remove_edge(u, v)
-
-        graph = graph_trimmed
-
-    embeddings = []
-    embedding_dict = {i: initial_pos[i] for i in range(len(initial_pos))}
-
-    initial_emb = EmbeddingState(
-        graph,
-        embedding_dict,
-        np.array([]),
-        labels=community_louvain.partition_at_level(dendrogram, len(dendrogram) - 1),
-    )
-
-    initial_emb.obj_id = 0
-    initial_emb.title = "Initial positions"
-    initial_emb.com_partition = community_louvain.partition_at_level(
-        dendrogram, len(dendrogram) - 1
-    )
-    embeddings.append(initial_emb)
-
-    for level in range(len(dendrogram)):
-        partition_dict = community_louvain.partition_at_level(dendrogram, level)
-        partition_values = set(partition_dict.values())
-
-        partition_centers = {}
-        partition_subgraphs = {}
-        partition_boundary_neighbors = {}
-
-        # compute center-coordinates (bounding box) of each partition used in force-directed layout
-        for partition in partition_values:
-            subgraph_points = [k for k, v in partition_dict.items() if v == partition]
-            subgraph_points_coords = np.array([initial_pos[i] for i in subgraph_points])
-            min_x, min_y = subgraph_points_coords.min(axis=0)
-            max_x, max_y = subgraph_points_coords.max(axis=0)
-            partition_centers[partition] = ((min_x + max_x) / 2, (min_y + max_y) / 2)
-
-            # subgraph = graph.subgraph(
-            #     [node for node, part in partition_dict.items() if part == partition]
-            # ).copy()
-
-            # TODO: Check if this is alternative subgraph computation is needed
-            subgraph_nodes = [
-                node for node, part in partition_dict.items() if part == partition
-            ]
-            subgraph = nx.Graph()
-            subgraph.add_nodes_from(subgraph_nodes)
-
-            for u, v in graph.edges():
-                if u in subgraph_nodes and v in subgraph_nodes:
-                    subgraph.add_edge(u, v, weight=graph[u][v]["weight"])
-
-            if boundary_edges:
-                subgraph, boundary_neighbors = add_boundary_edges(subgraph, subgraph)
-                partition_boundary_neighbors[partition] = boundary_neighbors
-
-            if mst:
-                subgraph = compute_mst(subgraph)
-
-            partition_subgraphs[partition] = subgraph
-
-        embeddings += [
-            deprecated_compute_kamada_kawai_layout(
-                graph.copy(),
-                embedding_dict.copy(),
-                partition_centers,
-                partition_subgraphs,
-                partition_dict,
-                level=level,
-                threshold=threshold,
-                mst=mst,
-                boundary_edges=boundary_edges,
-                pairwise_dists=pairwise_dists,
-            )
-        ]
-
-    return embeddings
-
-
-def compute_multilevel_fd(
-    data: pd.DataFrame, sim_features: list[str], sim_threshold: int = -2
-) -> list[EmbeddingState]:
-    # TODO: maybe outsource to separate function
-    knn_graph = kneighbors_graph(data, n_neighbors=3, mode="distance")
-
-    pairwise_dists = compute_pairwise_dists(data, invert=True)
-    pairwise_dists_feat = compute_pairwise_dists(
-        data, sim_features=sim_features, invert=False
-    )
-    knn_graph_nx = nx.Graph(knn_graph)
-
-    for u, v in knn_graph_nx.edges():
-        knn_graph_nx[u][v]["weight"] = pairwise_dists[u][v]
-
-    print("------------------------------------------------------------")
-    print("Computing initial multilevel graph layout via force electrical-layouting")
-    start_time = time.time()
-
-    # I. coarsening phase
-    dendrogram = community_louvain.generate_dendrogram(knn_graph_nx, random_state=0)
-    dendrogram_size = len(dendrogram)
-
-    # II. compute initial layout
-    partition_dict = community_louvain.partition_at_level(
-        dendrogram, dendrogram_size - 1
-    )
-    induced_graph = community_louvain.induced_graph(partition_dict, knn_graph_nx)
-    induced_graph.remove_edges_from(nx.selfloop_edges(induced_graph))
-
-    embeddings = []
-    iterations = 50
-
-    graph_updated_pos = nx.spring_layout(
-        induced_graph,
-        iterations=iterations,
-        weight="weight",
-        k=5.0,
-        seed=0,
-        scale=100.0,
-    )
-
-    initial_emb = EmbeddingState(
-        induced_graph, graph_updated_pos, np.array([]), labels=partition_dict
-    )
-
-    initial_emb.obj_id = dendrogram_size - 1
-    initial_emb.title = (
-        f"Multilevel spring-electric layout at level {dendrogram_size - 1}"
-    )
-    initial_emb.com_partition = partition_dict
-    embeddings.append(initial_emb)
-
-    end_time = time.time()
-    print(f"Computation finished after {end_time - start_time:.2f} seconds")
-    print("------------------------------------------------------------")
-
-    # III. refinement step (iterate over reversed dendrogram levels, start at the top)
-    for level in range(dendrogram_size - 2, -2, -1):
-        print("------------------------------------------------------------")
-        print(
-            f"Computing multilevel graph layout via force electrical-layouting at level {level}"
-        )
-        start_time = time.time()
-
-        partition_prev_dict = embeddings[-1].com_partition
-        partition_centers = embeddings[-1].embedding
-        partition_subgraphs = {}
-
-        if level >= 0:
-            partition_dict = community_louvain.partition_at_level(dendrogram, level)
-            induced_graph = community_louvain.induced_graph(
-                partition_dict, knn_graph_nx
-            )
-        else:
-            partition_dict = embeddings[-1].com_partition
-            induced_graph = knn_graph_nx
-
-        induced_graph.remove_edges_from(nx.selfloop_edges(induced_graph))
-
-        for partition in set(partition_prev_dict.values()):
-            subgraph_points = [
-                k for k, v in partition_prev_dict.items() if v == partition
-            ]
-
-            # filter abstract nodes, which are contained in the partition at the next higher level
-            if level >= 0:
-                com_points = set(
-                    [partition_dict[k] for k in subgraph_points if k in partition_dict]
-                )
-                # com_points = [
-                #     v
-                #     for k, v in partition_dict.items()
-                #     for k1 in subgraph_points
-                #     if k == k1
-                # ]
-                # com_points = set(com_points)
-            else:
-                com_points = set(subgraph_points)
-
-            subgraph = induced_graph.subgraph([node for node in com_points]).copy()
-            partition_subgraphs[partition] = subgraph
-
-        iteration_embedding_dict = {}
-        for part_key, part_graph in partition_subgraphs.items():
-            if part_key not in partition_centers:
-                print(f"Warning: partition {part_key} has no center. Using origin.")
-
-            initial_pos_dict = {
-                node: partition_centers[part_key] for node in part_graph.nodes()
-            }
-
-            if level <= sim_threshold:
-                node_list = list(part_graph.nodes)
-
-                pairwise_dists_dict = {
-                    node_list[i]: {
-                        node_list[j]: pairwise_dists_feat[i][j]
-                        for j in range(len(node_list))
-                        if i != j
-                    }
-                    for i in range(len(node_list))
-                }
-
-                subgraph_updated_pos = nx.kamada_kawai_layout(
-                    part_graph,
-                    dist=pairwise_dists_dict,
-                    pos=initial_pos_dict,
-                    center=partition_centers[part_key],
-                    weight=None,
-                    scale=6.0,
-                )
-            else:
-                subgraph_updated_pos = nx.spring_layout(
-                    part_graph,
-                    pos=initial_pos_dict,
-                    iterations=100,
-                    weight="weight",
-                    center=partition_centers[part_key],
-                    k=level + 3.0,
-                    scale=10.0 + max(0, level * 10),
-                    seed=0,
-                )
-
-            for node in part_graph.nodes():
-                iteration_embedding_dict[node] = subgraph_updated_pos[node]
-
-        # Define embedding object
-        emb = EmbeddingState(
-            induced_graph,
-            iteration_embedding_dict,
-            np.array([]),
-            labels=partition_prev_dict,
-            partition_centers=partition_centers,
-        )
-        emb.com_partition = partition_dict
-
-        emb.obj_id = level
-        emb.title = f"Multilevel spring-electric layout at level {level}"
-
-        embeddings.append(emb)
-
-        end_time = time.time()
-        print(f"Computation finished after {end_time - start_time:.2f} seconds")
-        print("------------------------------------------------------------")
-
-    return embeddings
-
-
-def compute_mst(graph: nx.Graph) -> nx.Graph:
-    # Invert weights, as similarity optimizes for 1, as MST-algorithms as Kruskal optimize for 0
-    for u, v in graph.edges:
-        graph[u][v]["weight"] = 1 - graph[u][v]["weight"]
-
-    mst_graph = nx.minimum_spanning_tree(graph)
-
-    # Revert weights to initial scaling
-    for u, v in mst_graph.edges:
-        mst_graph[u][v]["weight"] = 1 - mst_graph[u][v]["weight"]
-
-    return mst_graph
-
-
 def add_boundary_edges(
     graph: nx.Graph, subgraph: nx.Graph
 ) -> tuple[nx.Graph, list[Any]]:
+    # actual subgraph with boundary nodes + edges
     subgraph_boundary_neighbors = subgraph.copy()
+
+    # collect boundary neighbors separately
     boundary_neighbors = set()
 
     for node in subgraph.nodes():
         neighbors = list(graph.neighbors(node))
         for neighbor in neighbors:
+            # check if neighbor is not part of the subgraph (i.e. is a boundary node)
             if neighbor not in subgraph.nodes():
                 boundary_neighbors.add(neighbor)
                 subgraph_boundary_neighbors.add_node(neighbor)
@@ -1392,80 +936,13 @@ def add_boundary_edges(
     return subgraph_boundary_neighbors, list(boundary_neighbors)
 
 
-def compute_spring_electrical_layout(
-    graph: nx.Graph,
-    embedding_dict: dict[int, npt.NDArray[np.float32]],
-    partition_centers: dict[int, npt.NDArray[np.float32]],
-    iterations: list[int],
-    partition_subgraphs=dict[int, nx.Graph],
-    partition_dict=dict[int, float],
-    partition_boundary_neighbors=dict[int, npt.NDArray[int]],
-    threshold: float | None = None,
-    mst: bool = False,
-    boundary_edges: bool = False,
-) -> list[EmbeddingState]:
-    embeddings = []
-
-    for iteration in iterations:
-        print("------------------------------------------------------------")
-        print("Computing modified embedding for iteration: ", iteration)
-
-        iteration_embedding_dict = embedding_dict.copy()
-
-        for part_key, part_graph in partition_subgraphs.items():
-            subgraph_pos = {node: embedding_dict[node] for node in part_graph.nodes}
-
-            subgraph_updated_pos = nx.spring_layout(
-                part_graph,
-                pos=subgraph_pos,
-                iterations=iteration,
-                fixed=partition_boundary_neighbors[part_key]
-                if boundary_edges
-                else None,
-                threshold=0.0001,
-                weight="weight",
-                center=partition_centers[part_key],
-                k=5.0,
-                seed=0,
-            )
-
-            for node in part_graph.nodes():
-                iteration_embedding_dict[node] = subgraph_updated_pos[node]
-
-        emb = EmbeddingState(
-            graph,
-            iteration_embedding_dict,
-            np.array([]),
-            labels=partition_dict,
-            partition_centers=partition_centers,
-        )
-
-        emb.obj_id = iteration
-        emb.title = "Positions after " + str(iteration) + " iterations"
-
-        if boundary_edges:
-            emb.title += ", boundary edges added"
-
-        if threshold is not None:
-            emb.title += f", edge-weight threshold: {threshold}"
-
-        if mst:
-            emb.title += ", MST-edges used"
-
-        embeddings.append(emb)
-
-        print("Computation finished")
-        print("------------------------------------------------------------")
-
-    return embeddings
-
-
 def compute_knn_graph(
     df: pd.DataFrame,
-    n_neighbors: int = 3,
+    n_neighbors: int = 15,
     mode: str = "distance",
     sim_features: list[str] | None = None,
 ) -> tuple[nx.Graph, npt.NDArray[np.float32]]:
+    # compute knn-graph based on feature selection
     if sim_features is None or len(sim_features) == 0:
         knn_graph = kneighbors_graph(df, n_neighbors=n_neighbors, mode=mode)
     else:
@@ -1473,6 +950,7 @@ def compute_knn_graph(
             df.loc[:, sim_features], n_neighbors=n_neighbors, mode=mode
         )
 
+    # compute pairwise distances and apply to edge weights in knn_graph
     pairwise_dists = compute_pairwise_dists(df, sim_features=sim_features)
     knn_graph_nx = nx.Graph(knn_graph)
 
@@ -1482,37 +960,3 @@ def compute_knn_graph(
         knn_graph_nx[u][v]["weight"] = pairwise_dists[u][v]
 
     return knn_graph_nx, edge_weights_knn
-
-
-def fit(
-    data: pd.DataFrame,
-    initial_pos: npt.NDArray[np.float32],
-    sim_features: list[str],
-    method: str = "force-directed",
-    n_neighbors: int = 3,
-    iterations: list[int] | None = None,
-    knn_graph: nx.Graph | None = None,
-) -> list[EmbeddingState]:
-    # TODO: Add assertion for falsy parameters
-    if iterations is None:
-        iterations = [1, 3, 5, 10]
-
-    if knn_graph is None:
-        knn_graph = kneighbors_graph(
-            data.loc[:, sim_features], n_neighbors=n_neighbors, mode="distance"
-        )
-        knn_graph = nx.Graph(knn_graph)
-
-    pairwise_dists = compute_pairwise_dists(data, sim_features)
-
-    for u, v in knn_graph.edges():
-        knn_graph[u][v]["weight"] = pairwise_dists[u][v]
-
-    embeddings = []
-
-    if method == "force-directed":
-        embeddings = compute_force_directed(knn_graph, initial_pos, iterations)
-    elif method == "local-force-directed":
-        embeddings = compute_local_force_directed(knn_graph, initial_pos, iterations)
-
-    return embeddings
