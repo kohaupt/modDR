@@ -13,6 +13,19 @@ from embeddingstate import EmbeddingState
 def compute_kruskal_stress(
     dists_highdim: npt.NDArray[np.float32], dists_lowdim: npt.NDArray[np.float32]
 ) -> float:
+    if dists_highdim.shape != dists_lowdim.shape:
+        raise ValueError(
+            f"Shape mismatch (dists_highdim.shape={dists_highdim.shape}, dists_lowdim.shape={dists_lowdim.shape}): "  # noqa: E501
+            f"Both arrays must have the same shape."
+        )
+
+    # convert to vector form if necessary as distances must not be used more than once
+    if dists_highdim.ndim != 1:
+        dists_highdim = squareform(dists_highdim)
+
+    if dists_lowdim.ndim != 1:
+        dists_lowdim = squareform(dists_lowdim)
+
     if not dists_highdim.any():
         print("WARNING: Highdim distances are all 0. Returning *absolute* stress.")
         stress_numerator = np.sum((dists_highdim - dists_lowdim) ** 2)
@@ -33,9 +46,21 @@ def compute_kruskal_stress_partition(
     dists_lowdim: npt.NDArray[np.float32],
     partition: dict[int, npt.NDArray[np.int32]],
 ) -> float:
-    # Holds sum of Kruskal stress for each community
+    if dists_highdim.shape != dists_lowdim.shape:
+        raise ValueError(
+            f"Shape mismatch (dists_highdim.shape={dists_highdim.shape}, dists_lowdim.shape={dists_lowdim.shape}): "  # noqa: E501
+            f"Both arrays must have the same shape."
+        )
+
+    # convert to square form if necessary, as extraction of distances requires 2D arrays
+    if dists_highdim.ndim != 2:
+        dists_highdim = squareform(dists_highdim)
+    if dists_lowdim.ndim != 2:
+        dists_lowdim = squareform(dists_lowdim)
+
+    # accumulated sum of Kruskal stress for each community
     kruskal_com = 0.0
-    # Counts number of used communities (communities with at least 2 nodes)
+    # counts number of used communities (communities with at least 2 nodes)
     community_count = 0
 
     for community_nodes in list(partition.values()):
@@ -61,10 +86,20 @@ def compute_kruskal_stress_partition(
     return kruskal_com / community_count
 
 
+# The computation of the co-ranking matrix and its associated metrics is adapted from the
+# pyDRMetrics package (https://github.com/zhangys11/pyDRMetrics) by Yinsheng Zhang (oo@zju.edu.cn / zhangys@illinois.edu)
+# Original code licensed under Creative Commons Attribution 4.0 International (CC BY 4.0)
+# See: https://creativecommons.org/licenses/by/4.0/
+# Changes: Only compute the AUC of the metrics if needed,
+# not automatically while computing the co-ranking matrix (for runtime efficiency).
 def coranking_matrix(
     r1: npt.NDArray[np.int32], r2: npt.NDArray[np.int32]
 ) -> npt.NDArray[np.int32]:
-    assert r1.shape == r2.shape
+    if r1.shape != r2.shape:
+        raise ValueError(
+            f"Shape mismatch (r1.shape={r1.shape}, r2.shape={r2.shape}): "
+            f"Both arrays must have the same shape."
+        )
     crm = np.zeros(r1.shape)
     m = len(crm)
 
@@ -75,6 +110,88 @@ def coranking_matrix(
     )
 
     return crm
+
+
+def compute_trustworthiness(cr_matrix: npt.NDArray[np.float32], k: int) -> float:
+    n = len(cr_matrix)
+    if k < 1 or k >= n:
+        raise ValueError(f"Invalid k: {k}. It must be in the range [1, {n - 1}].")
+
+    qs = cr_matrix[k:, :k]
+    w = np.arange(qs.shape[0]).reshape(-1, 1)
+    return 1 - np.sum(qs * w) / k / n / (n - 1 - k)
+
+
+def compute_continuity(cr_matrix: npt.NDArray[np.float32], k: int) -> float:
+    n = len(cr_matrix)
+    if k < 1 or k >= n:
+        raise ValueError(f"Invalid k: {k}. It must be in the range [1, {n - 1}].")
+
+    qs = cr_matrix[:k, k:]
+    w = np.arange(qs.shape[1]).reshape(1, -1)
+    return 1 - np.sum(qs * w) / k / n / (n - 1 - k)
+
+
+def compute_rnx(qnn: npt.NDArray[np.float32], k: int) -> float:
+    n = len(qnn)
+    if k < 1 or k >= n:
+        raise ValueError(f"Invalid k: {k}. It must be in the range [1, {n - 1}].")
+
+    return (n * qnn[k - 1] - k) / (n - k)
+
+
+def compute_rank_score(embedding: EmbeddingState) -> float:
+    rank_score_list = [
+        embedding.metrics.get("trustworthiness", None),
+        embedding.metrics.get("continuity", None),
+        embedding.metrics.get("rnx", None),
+    ]
+
+    if any(x is None for x in rank_score_list):
+        raise ValueError(
+            "All of the following metrics must be computed to compute the rank score:"
+            "`trustworthiness`, `continuity`, `rnx`."
+        )
+
+    rank_score_nominator = np.sum(rank_score_list)
+    return rank_score_nominator / len(rank_score_list)
+
+
+def compute_dist_score(embedding: EmbeddingState) -> float:
+    required_keys = ["sim_stress", "sim_stress_com_diff"]
+    if not all(metric in embedding.metrics for metric in required_keys):
+        raise ValueError(
+            "All of the following metrics must be computed to compute the distance score:"  # noqa: E501
+            "`sim_stress`, `sim_stress_com_diff`."
+        )
+
+    # normalize to [0, 1]
+    stress_com_diff_norm = (embedding.metrics["sim_stress_com_diff"] + 1) / 2
+
+    distance_score_list = [
+        embedding.metrics["sim_stress"],
+        stress_com_diff_norm,
+    ]
+
+    distance_score_nominator = np.sum(distance_score_list)
+    return 1 - (distance_score_nominator / len(distance_score_list))
+
+
+def compute_total_score(
+    embedding: EmbeddingState,
+    balance: float = 0.5,
+) -> float:
+    required_keys = ["rank_score", "distance_score"]
+    if not all(metric in embedding.metrics for metric in required_keys):
+        raise ValueError(
+            "All of the following metrics must be computed to compute the total score:"
+            "`rank_score`, `distance_score`."
+        )
+
+    return (
+        balance * embedding.metrics["rank_score"]
+        + (1 - balance) * embedding.metrics["distance_score"]
+    )
 
 
 def compute_metrics(
@@ -98,7 +215,7 @@ def compute_metrics(
         rank_highdim = [np.argsort(np.argsort(row)) for row in dists_highdim]
 
     # compute pairwise distances for reference data to compute differences in community-stress.
-    # Assuming that the reference data is the same for all embeddings and is given by the first embedding.
+    # assuming that the reference data is the same for all embeddings and is given by the first embedding.
     if distance_metrics:
         reference_df = pd.DataFrame(embeddings[0].embedding.values(), index=None)
         reference_lowdim = processing.compute_pairwise_dists(reference_df)
@@ -109,17 +226,18 @@ def compute_metrics(
             print(f"Computing global metrics for embedding: `{emb.title}'.")
             start_time = time.time()
 
-        # compute pairwise distances + ranking matrix for lowdim data
-        lowdim_df = pd.DataFrame(emb.embedding.values(), index=None)
-        dists_lowdim = processing.compute_pairwise_dists(lowdim_df)
-        rank_lowdim = [np.argsort(np.argsort(row)) for row in dists_lowdim]
-
         # The computation of the co-ranking matrix and its associated metrics is adapted from the
         # pyDRMetrics package (https://github.com/zhangys11/pyDRMetrics) by Yinsheng Zhang (oo@zju.edu.cn / zhangys@illinois.edu)
         # Original code licensed under Creative Commons Attribution 4.0 International (CC BY 4.0)
         # See: https://creativecommons.org/licenses/by/4.0/
         # Changes: Only compute the AUC of the metrics if needed,
         # not automatically while computing the co-ranking matrix (for runtime efficiency).
+
+        # compute pairwise distances + ranking matrix for lowdim data
+        lowdim_df = pd.DataFrame(emb.embedding.values(), index=None)
+        dists_lowdim = processing.compute_pairwise_dists(lowdim_df)
+        rank_lowdim = [np.argsort(np.argsort(row)) for row in dists_lowdim]
+
         if ranking_metrics:
             cr_matrix = coranking_matrix(
                 np.asarray(rank_highdim, dtype=int),
@@ -129,82 +247,46 @@ def compute_metrics(
             cr_matrix = cr_matrix[1:, 1:]
             n = len(cr_matrix)
 
-            trustworthiness = np.zeros(n - 1)  # trustworthiness
-            continuity = np.zeros(n - 1)  # continuity
-            r_quality = np.zeros(n - 1)  # R-Quality (Rnx)
-            qnn = np.zeros(n)  # Co-k-nearest neighbor size
+            trustworthiness = np.zeros(n - 1)
+            continuity = np.zeros(n - 1)
+            r_quality = np.zeros(n - 1)
+            qnn = np.zeros(n)
 
+            # compute cumulative sums for QNN
             cr_matrix_cumsum = np.cumsum(np.cumsum(cr_matrix, axis=0), axis=1)
-            diag_idxs = np.arange(n)
-            qnn = cr_matrix_cumsum[diag_idxs, diag_idxs] / ((diag_idxs + 1) * n)
+            diag_k = np.arange(n)
+            qnn = cr_matrix_cumsum[diag_k, diag_k] / ((diag_k + 1) * n)
 
-            # TODO: add further validation for fixed_k
-            if fixed_k is None:
-                for k in range(n - 1):
-                    qs = cr_matrix[k:, :k]
-                    w = np.arange(
-                        qs.shape[0]
-                    ).reshape(
-                        -1, 1
-                    )  # a column vector of weights. weight = rank error = actual_rank - k
-                    trustworthiness[k] = (
-                        1 - np.sum(qs * w) / (k + 1) / n / (n - 1 - k)
-                    )  # 1 - normalized hard-k-intrusions. lower-left region. weighted by rank error (rank - k)
-                    w = np.arange(qs.shape[1]).reshape(
-                        1, -1
-                    )  # a row vector of weights. weight = rank error = actual_rank - k
-                    continuity[k] = 1 - np.sum(qs * w) / (k + 1) / n / (
-                        n - 1 - k
-                    )  # 1 - normalized hard-k-extrusions. upper-right region
+            # compute metrics for single k if fixed_k is set
+            if fixed_k is not None:
+                if fixed_k < 1 or fixed_k >= n:
+                    raise ValueError(
+                        f"Invalid fixed_k: {fixed_k}. "
+                        f"It must be in the range [1, {n - 1}]."
+                    )
 
-                    r_quality[k] = (n * qnn[k - 1] - k) / (n - k)
+                emb.metrics["trustworthiness"] = compute_trustworthiness(
+                    cr_matrix, fixed_k
+                )
+                emb.metrics["continuity"] = compute_continuity(cr_matrix, fixed_k)
+                emb.metrics["rnx"] = compute_rnx(qnn, fixed_k)
+            # compute AUC values (mean over all ks) if fixed_k is not set
+            else:
+                for k in range(1, n):
+                    trustworthiness[k - 1] = compute_trustworthiness(cr_matrix, k)
+                    continuity[k - 1] = compute_continuity(cr_matrix, k)
+                    r_quality[k - 1] = compute_rnx(qnn, k)
 
                 emb.metrics["trustworthiness"] = np.mean(trustworthiness)
                 emb.metrics["continuity"] = np.mean(continuity)
                 emb.metrics["rnx"] = np.mean(r_quality)
 
-            else:
-                k = fixed_k
-                qs = cr_matrix[k:, :k]
-                w = np.arange(qs.shape[0]).reshape(
-                    -1, 1
-                )  # a column vector of weights. weight = rank error = actual_rank - k
-                trustworthiness = (
-                    1 - np.sum(qs * w) / (k + 1) / n / (n - 1 - k)
-                )  # 1 - normalized hard-k-intrusions. lower-left region. weighted by rank error (rank - k)
-                w = np.arange(qs.shape[1]).reshape(
-                    1, -1
-                )  # a row vector of weights. weight = rank error = actual_rank - k
-                continuity = 1 - np.sum(qs * w) / (k + 1) / n / (
-                    n - 1 - k
-                )  # 1 - normalized hard-k-extrusions. upper-right region
-                # R = ((m - 1) * QNN[k-1] - k) / (m - 1 - k)
-                r_quality = (n * qnn[k - 1] - k) / (n - k)
-
-                emb.metrics["trustworthiness"] = trustworthiness
-                emb.metrics["continuity"] = continuity
-                emb.metrics["rnx"] = r_quality
-
-            rank_score_list = [
-                emb.metrics["trustworthiness"],
-                emb.metrics["continuity"],
-                emb.metrics["rnx"],
-            ]
-            rank_score_nominator = np.sum(rank_score_list)
-
-            # avoid division by zero if all scores are zero (not computed)
-            if rank_score_nominator > 0.0:
-                # compute global rank score as the average of the non-zero (i. e. computed) scores
-                rank_score_denominator = len([x for x in rank_score_list if x > 0.0])
-                emb.metrics["rank_score"] = (
-                    rank_score_nominator / rank_score_denominator
-                )
-
+            emb.metrics["rank_score"] = compute_rank_score(emb)
             emb.metrics["coranking_matrix"] = cr_matrix
 
         if distance_metrics:
             if emb.com_partition is None:
-                # if no communities are defined, use the whole embedding as one community
+                # if no communities are defined, use the whole embedding as one community  # noqa: E501
                 emb.com_partition = {0: np.arange(len(emb.embedding))}
 
             dists_highdim_feat = processing.compute_pairwise_dists(
@@ -230,25 +312,9 @@ def compute_metrics(
                 dists_highdim_feat, dists_lowdim
             )
 
-            stress_com_diff_norm = (emb.metrics["sim_stress_com_diff"] + 1) / 2
+            emb.metrics["distance_score"] = compute_dist_score(emb)
 
-            distance_score_list = [
-                emb.metrics["sim_stress"],
-                stress_com_diff_norm,
-            ]
-            distance_score_nominator = np.sum(distance_score_list)
-
-            # avoid division by zero if all scores are zero (not computed)
-            if distance_score_nominator > 0.0:
-                # compute rank score as the average of the non-zero (i. e. computed) scores
-                distance_score_denominator = len(
-                    [x for x in distance_score_list if x > 0.0]
-                )
-                emb.metrics["distance_score"] = 1 - (
-                    distance_score_nominator / distance_score_denominator
-                )
-
-        emb.metrics["total_score"] = metric_total_score(emb)
+        emb.metrics["total_score"] = compute_total_score(emb)
 
         if verbose:
             end_time = time.time()
@@ -256,16 +322,6 @@ def compute_metrics(
             print("------------------------------------------------------------")
 
     return embeddings
-
-
-def metric_total_score(
-    embedding_obj: EmbeddingState,
-    balance: float | None = 0.5,
-) -> float:
-    return (
-        balance * embedding_obj.metrics["rank_score"]
-        + (1 - balance) * embedding_obj.metrics["distance_score"]
-    )
 
 
 def create_report(
@@ -278,7 +334,7 @@ def create_report(
         return pd.DataFrame()
 
     if metadata and not metrics:
-        df = pd.DataFrame(
+        emb_df = pd.DataFrame(
             [
                 {
                     "obj_id": e.obj_id,
@@ -287,10 +343,10 @@ def create_report(
                 for e in embeddings
             ]
         )
-        return df
+        return emb_df
 
     if not metadata and metrics:
-        df = pd.DataFrame(
+        emb_df = pd.DataFrame(
             [
                 {
                     "obj_id": e.obj_id,
@@ -299,9 +355,10 @@ def create_report(
                 for e in embeddings
             ]
         )
+        return emb_df.drop(columns=["coranking_matrix"])
 
     # both metadata and metrics are True
-    df = pd.DataFrame(
+    emb_df = pd.DataFrame(
         [
             {
                 "obj_id": e.obj_id,
@@ -311,3 +368,5 @@ def create_report(
             for e in embeddings
         ]
     )
+
+    return emb_df.drop(columns=["coranking_matrix"])
