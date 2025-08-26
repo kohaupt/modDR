@@ -42,10 +42,12 @@ def display_embeddings(
 
     for i in range(len(axs)):
         if i < len(embeddings):
-            graph = embeddings[i].sim_graph.copy()
+            graph = embeddings[i].graph.copy()
             positions = embeddings[i].embedding.copy()
             node_sizes = [20] * graph.number_of_nodes()
-            edge_colors = embeddings[i].edge_weights
+            edge_colors = np.array(
+                list(nx.get_edge_attributes(embeddings[i].graph, "weight", 1).values())
+            )
 
             # add node labels (colors), if provided
             node_colors = []
@@ -152,8 +154,8 @@ def display_embeddings(
                 cbar.set_label("Node Values")
 
             if show_edge_cbar:
-                vmin = min(embeddings[i].edge_weights)
-                vmax = max(embeddings[i].edge_weights)
+                vmin = min(edge_colors)
+                vmax = max(edge_colors)
 
                 norm = mpl.colors.Normalize(vmin=vmin, vmax=vmax)
                 sm = plt.cm.ScalarMappable(cmap=edge_cmap, norm=norm)
@@ -225,7 +227,7 @@ def plot_community_graphs(
 
             if not only_communities:
                 # add all nodes and their positions to the graph
-                graph.add_nodes_from(embeddings[i].sim_graph.nodes(data=True))
+                graph.add_nodes_from(embeddings[i].graph.nodes(data=True))
                 positions = embeddings[i].embedding.copy()
 
             if emb_community_ids is not None:
@@ -491,7 +493,7 @@ def plot_pos_movements(
         # filter nodes based on the specified communities
         filtered_node_ids = [
             node
-            for node, community in target.sim_graph.nodes(data="community")
+            for node, community in target.graph.nodes(data="community")
             if community in filtered_communities
         ]
 
@@ -516,12 +518,12 @@ def plot_pos_movements(
         if filtered_communities is not None:
             # filter the community dictionary to only include the specified communities
             community_dict = {
-                node: target.sim_graph.nodes[node]["community"]
+                node: target.graph.nodes[node]["community"]
                 for node in filtered_node_ids
             }
         else:
             community_dict = {
-                node: target.sim_graph.nodes[node]["community"]
+                node: target.graph.nodes[node]["community"]
                 for node in list(target.embedding.keys())
             }
 

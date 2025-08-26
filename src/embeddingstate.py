@@ -27,15 +27,13 @@ class MetricsDict(TypedDict):
     distance_score: float
     total_score: float
     coranking_matrix: npt.NDArray[np.int32] | None
-    jaccard: npt.NDArray[np.float32] | None
 
 
 @dataclass
 class EmbeddingState:
     obj_id: float
-    sim_graph: nx.Graph
+    graph: nx.Graph
     embedding: dict[int, npt.NDArray[np.float32]]
-    edge_weights: npt.NDArray[np.float32]
     metadata: MetaDataDict
     metrics: MetricsDict
     title: str | None
@@ -47,19 +45,14 @@ class EmbeddingState:
     def __init__(
         self,
         embedding: dict[int, npt.NDArray[np.float32]],
-        edge_weights: npt.NDArray[np.float32],
         graph: nx.Graph | None = None,
         title: str | None = None,
         obj_id: float | None = None,
         labels: dict[int, float] | None = None,
         partition_centers: dict[int, npt.NDArray[np.float32]] | None = None,
     ) -> None:
-        self.sim_graph = graph
+        self.graph = graph
         self.embedding = embedding
-        if graph is not None and len(edge_weights) == 0:
-            self.edge_weights = self.get_edge_weights()
-        else:
-            self.edge_weights = edge_weights
 
         self.title = title
 
@@ -92,7 +85,6 @@ class EmbeddingState:
             distance_score=0.0,
             total_score=0.0,
             coranking_matrix=None,
-            jaccard=None,
         )
 
     def __str__(self) -> str:
@@ -100,15 +92,10 @@ class EmbeddingState:
             "---------------------------------------\n"
             f"Embedding object (ID: {self.obj_id})\n"
             f"Title: '{self.title}'\n"
-            f"Graph: {self.sim_graph}\n"
             f"Embedding shape: {len(self.embedding.items())}\n"
-            f"Shape of edge weights: {self.edge_weights.shape}\n\n"
+            f"Graph nodes: {self.graph.number_of_nodes() if self.graph else 0}\n"
+            f"Graph edges: {self.graph.number_of_edges() if self.graph else 0}\n\n"
+            f"Metadata: \n  {'\n  '.join(f'{k}: {v}' for k, v in self.metadata.items())}\n\n"  # noqa: E501
+            f"Metrics: \n  {'\n  '.join(f'{k}: {v}' for k, v in self.metrics.items())}\n"  # noqa: E501
             "---------------------------------------"
         )
-
-    def get_edge_weights(self) -> npt.NDArray[np.float32]:
-        edges = self.sim_graph.edges(data=True)
-        return np.array([e[-1]["weight"] for e in edges if "weight" in e[-1]])
-
-    def get_metadata_str(self) -> str:
-        return " | ".join(f"{k}: {v}" for k, v in self.metadata.items() if v)

@@ -9,7 +9,6 @@ import numpy as np
 import numpy.typing as npt
 import pandas as pd
 import umap
-from community import community_louvain
 from igraph import Graph
 from scipy.spatial.distance import pdist, squareform
 from sklearn.manifold import MDS
@@ -80,12 +79,12 @@ def run_pipeline(
 
     # 3. Step: graph construction
     if graph_method == "KNN":
-        reference.sim_graph, _ = compute_knn_graph(
+        reference.graph, _ = compute_knn_graph(
             data, n_neighbors=3, sim_features=sim_features
         )
 
     # 4. Step: community detection & position refinement
-    weights = [d["weight"] for _, _, d in reference.sim_graph.edges(data=True)]
+    weights = [d["weight"] for _, _, d in reference.graph.edges(data=True)]
     min_w, max_w = min(weights), max(weights)
 
     if community_resolutions is None:
@@ -113,7 +112,7 @@ def run_pipeline(
 
     # set the community partition for the reference embedding to avoid errors
     reference.com_partition = {0: np.arange(len(reference.embedding))}
-    nx.set_node_attributes(reference.sim_graph, 0, "community")
+    nx.set_node_attributes(reference.graph, 0, "community")
 
     reference.obj_id = 0
     embeddings = [reference]
@@ -283,7 +282,6 @@ def dimensionality_reduction_umap(
 
     umap_embedding = EmbeddingState(
         embedding=embedding_dict,
-        edge_weights=np.array([]),
         graph=nx.Graph(reducer.graph_),
         title=f"UMAP (n_neigbors: {n_neighbors}, min_dist: {min_dist})",
     )
@@ -360,7 +358,7 @@ def assign_graph_edge_weights(
     """
     3. Step of the modDR pipeline: Graph Construction via Feature Similarity.
     """
-    if embedding.sim_graph is None:
+    if embedding.graph is None:
         raise ValueError("Embedding object must have a similarity graph.")
 
     if verbose:
@@ -373,15 +371,13 @@ def assign_graph_edge_weights(
         embedding = copy.deepcopy(embedding)
 
     edge_weights = []
-    for u, v in embedding.sim_graph.edges():
-        embedding.sim_graph[u][v]["weight"] = similarity_matrix[u][v]
+    for u, v in embedding.graph.edges():
+        embedding.graph[u][v]["weight"] = similarity_matrix[u][v]
         edge_weights.append(similarity_matrix[u][v])
-
-    embedding.edge_weights = np.array(edge_weights, dtype=np.float32)
 
     if verbose:
         print(
-            f"Edge-weights set for {len(embedding.sim_graph.edges())} edges in the graph."
+            f"Edge-weights set for {len(embedding.graph.edges())} edges in the graph."
         )
         print("------------------------------------------------------------")
 
@@ -408,7 +404,7 @@ def com_detection_leiden(
     if not inplace:
         embedding = copy.deepcopy(embedding)
 
-    g_ig = Graph.from_networkx(embedding.sim_graph)
+    g_ig = Graph.from_networkx(embedding.graph)
 
     partition = la.find_partition(
         g_ig,
@@ -423,7 +419,7 @@ def com_detection_leiden(
         comm_dict[i] = community
 
         for node in community:
-            embedding.sim_graph.nodes[g_ig.vs[node]["_nx_name"]]["community"] = i
+            embedding.graph.nodes[g_ig.vs[node]["_nx_name"]]["community"] = i
 
     embedding.com_partition = comm_dict
     embedding.title = embedding.title + f", Leiden (resolution: {resolution_parameter})"
@@ -597,17 +593,17 @@ def compute_community_graphs(
         # partition_centers[part] = ((min_x + max_x) / 2, (min_y + max_y) / 2)
         partition_centers[part] = np.median(subgraph_points_coords, axis=0)
 
-        subgraph = embedding.sim_graph.subgraph(
+        subgraph = embedding.graph.subgraph(
             [
                 node
-                for node, attrs_dict in embedding.sim_graph.nodes(data=True)
+                for node, attrs_dict in embedding.graph.nodes(data=True)
                 if attrs_dict["community"] == part
             ]
         ).copy()
 
         if boundary_neighbors:
             subgraph, part_boundary_neighbors = add_boundary_edges(
-                embedding.sim_graph, subgraph
+                embedding.graph, subgraph
             )
             partition_boundary_neighbors[part] = part_boundary_neighbors
 
