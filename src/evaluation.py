@@ -13,6 +13,26 @@ from embeddingstate import EmbeddingState
 def compute_kruskal_stress(
     dists_highdim: npt.NDArray[np.float32], dists_lowdim: npt.NDArray[np.float32]
 ) -> float:
+    """Compute the Kruskal stress metric between high-dimensional and low-dimensional distances.
+
+    Kruskal stress measures how well the low-dimensional embedding preserves the
+    pairwise distances from the high-dimensional space. The stress is normalized
+    by the sum of squared high-dimensional distances.
+
+    Args:
+        dists_highdim (npt.NDArray[np.float32]): Array of pairwise distances in high-dimensional space.
+            Can be either a square distance matrix or condensed distance vector.
+        dists_lowdim (npt.NDArray[np.float32]): Array of pairwise distances in low-dimensional space.
+            Can be either a square distance matrix or condensed distance vector.
+            Must have the same shape as dists_highdim.
+
+    Returns:
+        float: The normalized Kruskal stress value (0 = perfect preservation,
+        higher = worse).
+
+    Raises:
+        ValueError: If the input arrays have different shapes.
+    """
     if dists_highdim.shape != dists_lowdim.shape:
         raise ValueError(
             f"Shape mismatch (dists_highdim.shape={dists_highdim.shape}, dists_lowdim.shape={dists_lowdim.shape}): "  # noqa: E501
@@ -46,6 +66,27 @@ def compute_kruskal_stress_partition(
     dists_lowdim: npt.NDArray[np.float32],
     partition: dict[int, npt.NDArray[np.int32]],
 ) -> float:
+    """Compute the average Kruskal stress for each community in a partition.
+
+    This function computes the Kruskal stress separately for each community
+    defined in the partition and returns the average stress across all communities
+    with at least 2 nodes.
+
+    Args:
+        dists_highdim (npt.NDArray[np.float32]): Array of pairwise distances in high-dimensional space.
+            Must be a square distance matrix or condensed distance vector.
+        dists_lowdim (npt.NDArray[np.float32]): Array of pairwise distances in low-dimensional space.
+            Must be a square distance matrix or condensed distance vector.
+            Must have the same shape as dists_highdim.
+        partition (dict[int, npt.NDArray[np.int32]]): Dictionary mapping community IDs to arrays of node indices
+            belonging to each community.
+
+    Returns:
+        float: The average Kruskal stress across all communities with at least 2 nodes.
+
+    Raises:
+        ValueError: If the input distance arrays have different shapes.
+    """
     if dists_highdim.shape != dists_lowdim.shape:
         raise ValueError(
             f"Shape mismatch (dists_highdim.shape={dists_highdim.shape}, dists_lowdim.shape={dists_lowdim.shape}): "  # noqa: E501
@@ -86,15 +127,36 @@ def compute_kruskal_stress_partition(
     return kruskal_com / community_count
 
 
-# The computation of the co-ranking matrix and its associated metrics is adapted from the
-# pyDRMetrics package (https://github.com/zhangys11/pyDRMetrics) by Yinsheng Zhang (oo@zju.edu.cn / zhangys@illinois.edu)
-# Original code licensed under Creative Commons Attribution 4.0 International (CC BY 4.0)
-# See: https://creativecommons.org/licenses/by/4.0/
-# Changes: Only compute the AUC of the metrics if needed,
-# not automatically while computing the co-ranking matrix (for runtime efficiency).
 def coranking_matrix(
     r1: npt.NDArray[np.int32], r2: npt.NDArray[np.int32]
 ) -> npt.NDArray[np.int32]:
+    """Compute the co-ranking matrix between two ranking arrays.
+
+    This implementation is adapted from the pyDRMetrics package by Yinsheng Zhang [1].
+    Modifications include computing AUC of metrics only when needed for runtime
+    efficiency, rather than automatically during co-ranking matrix computation.
+
+    Args:
+        r1 (npt.NDArray[np.int32]): Ranking matrix for the original high-dimensional space.
+            Each row contains the ranks of distances for one data point.
+        r2 (npt.NDArray[np.int32]): Ranking matrix for the reduced low-dimensional space.
+            Each row contains the ranks of distances for one data point.
+            Must have the same shape as r1.
+
+    Returns:
+        npt.NDArray[np.int32]: The co-ranking matrix as a 2D array where entry (i,j) represents
+        the count of points that are among the i nearest neighbors in the
+        original space and j nearest neighbors in the reduced space.
+
+    Raises:
+        ValueError: If the input ranking arrays have different shapes.
+
+    References:
+        [1] Zhang, Y. pyDRMetrics: A Python package for dimensionality reduction
+        quality metrics. https://github.com/zhangys11/pyDRMetrics
+        Licensed under Creative Commons Attribution 4.0 International (CC BY 4.0).
+        https://creativecommons.org/licenses/by/4.0/
+    """
     if r1.shape != r2.shape:
         raise ValueError(
             f"Shape mismatch (r1.shape={r1.shape}, r2.shape={r2.shape}): "
@@ -113,6 +175,31 @@ def coranking_matrix(
 
 
 def compute_trustworthiness(cr_matrix: npt.NDArray[np.float32], k: int) -> float:
+    """Compute the trustworthiness metric from a co-ranking matrix.
+
+    Trustworthiness measures how well the k-nearest neighbors in the
+    low-dimensional space correspond to the k-nearest neighbors in the
+    high-dimensional space. A value of 1 indicates perfect trustworthiness.
+
+    This implementation is adapted from the pyDRMetrics package by Yinsheng Zhang [1].
+
+    Args:
+        cr_matrix (npt.NDArray[np.float32]): The co-ranking matrix computed from ranking data.
+        k (int): The neighborhood size parameter. Must be in range [1, n-1] where
+            n is the size of the co-ranking matrix.
+
+    Returns:
+        float: The trustworthiness value between 0 and 1, where 1 is perfect.
+
+    Raises:
+        ValueError: If k is not in the valid range [1, n-1].
+
+    References:
+        [1] Zhang, Y. pyDRMetrics: A Python package for dimensionality reduction
+        quality metrics. https://github.com/zhangys11/pyDRMetrics
+        Licensed under Creative Commons Attribution 4.0 International (CC BY 4.0).
+        https://creativecommons.org/licenses/by/4.0/
+    """
     n = len(cr_matrix)
     if k < 1 or k >= n:
         raise ValueError(f"Invalid k: {k}. It must be in the range [1, {n - 1}].")
@@ -123,6 +210,31 @@ def compute_trustworthiness(cr_matrix: npt.NDArray[np.float32], k: int) -> float
 
 
 def compute_continuity(cr_matrix: npt.NDArray[np.float32], k: int) -> float:
+    """Compute the continuity metric from a co-ranking matrix.
+
+    Continuity measures how well the k-nearest neighbors in the
+    high-dimensional space correspond to the k-nearest neighbors in the
+    low-dimensional space. A value of 1 indicates perfect continuity.
+
+    This implementation is adapted from the pyDRMetrics package by Yinsheng Zhang [1].
+
+    Args:
+        cr_matrix (npt.NDArray[np.float32]): The co-ranking matrix computed from ranking data.
+        k (int): The neighborhood size parameter. Must be in range [1, n-1] where
+            n is the size of the co-ranking matrix.
+
+    Returns:
+        float: The continuity value between 0 and 1, where 1 is perfect.
+
+    Raises:
+        ValueError: If k is not in the valid range [1, n-1].
+
+    References:
+        [1] Zhang, Y. pyDRMetrics: A Python package for dimensionality reduction
+        quality metrics. https://github.com/zhangys11/pyDRMetrics
+        Licensed under Creative Commons Attribution 4.0 International (CC BY 4.0).
+        https://creativecommons.org/licenses/by/4.0/
+    """
     n = len(cr_matrix)
     if k < 1 or k >= n:
         raise ValueError(f"Invalid k: {k}. It must be in the range [1, {n - 1}].")
@@ -133,6 +245,27 @@ def compute_continuity(cr_matrix: npt.NDArray[np.float32], k: int) -> float:
 
 
 def compute_rnx(qnn: npt.NDArray[np.float32], k: int) -> float:
+    """Compute the RNX (R_NX) metric from QNN values (see [1]).
+
+    RNX (Rank-based relative neighborhood preservation) measures the degree
+    to which the neighborhood structure is preserved in the dimensionality
+    reduction. A value of 1 indicates perfect preservation.
+
+    Args:
+        qnn (npt.NDArray[np.float32]): Array of QNN (Quality of Nearest Neighbors) values computed
+            from the co-ranking matrix.
+        k (int): The neighborhood size parameter. Must be in range [1, n-1] where
+            n is the length of the qnn array.
+
+    Returns:
+        float: The RNX value, where 1 indicates perfect neighborhood preservation.
+
+    Raises:
+        ValueError: If k is not in the valid range [1, n-1].
+
+    Reference:
+        [1]: Lee, J. A., et al. "Type 1 and 2 mixtures of Kullback–Leibler divergences as cost functions in dimensionality reduction based on similarity preservation." Neurocomputing 112 (2013): 92-108. https://doi.org/10.1016/j.neucom.2012.12.036
+    """
     n = len(qnn)
     if k < 1 or k >= n:
         raise ValueError(f"Invalid k: {k}. It must be in the range [1, {n - 1}].")
@@ -141,6 +274,23 @@ def compute_rnx(qnn: npt.NDArray[np.float32], k: int) -> float:
 
 
 def compute_rank_score(embedding: EmbeddingState) -> float:
+    """Compute the overall rank score from ranking-based metrics.
+
+    The rank score is the average of trustworthiness, continuity, and RNX metrics.
+    All three metrics must have been computed and stored in the embedding's
+    metrics dictionary.
+
+    Args:
+        embedding (EmbeddingState): An EmbeddingState object containing the computed metrics
+            'trustworthiness', 'continuity', and 'rnx'.
+
+    Returns:
+        float: The average rank score as a float between 0 and 1, where 1 is perfect.
+
+    Raises:
+        ValueError: If any of the required metrics are missing from the
+            embedding's metrics dictionary.
+    """
     rank_score_list = [
         embedding.metrics.get("trustworthiness", None),
         embedding.metrics.get("continuity", None),
@@ -158,6 +308,24 @@ def compute_rank_score(embedding: EmbeddingState) -> float:
 
 
 def compute_dist_score(embedding: EmbeddingState) -> float:
+    """Compute the overall distance score from distance-based metrics.
+
+    The distance score combines similarity stress and community stress difference
+    metrics to provide an overall assessment of distance preservation quality.
+    The score is normalized to the range [0, 1] where 1 is perfect.
+
+    Args:
+        embedding (EmbeddingState): An EmbeddingState object containing the computed metrics
+            'sim_stress' and 'sim_stress_com_diff'.
+
+    Returns:
+        float: The distance score as a float between 0 and 1, where 1 is perfect.
+
+    Raises:
+        ValueError: If any of the required metrics ('sim_stress',
+            'sim_stress_com_diff') are missing from the embedding's
+            metrics dictionary.
+    """
     required_keys = ["sim_stress", "sim_stress_com_diff"]
     if not all(metric in embedding.metrics for metric in required_keys):
         raise ValueError(
@@ -181,6 +349,24 @@ def compute_total_score(
     embedding: EmbeddingState,
     balance: float = 0.5,
 ) -> float:
+    """Compute the overall total score by combining rank and distance scores.
+
+    The total score is a weighted average of the rank score and distance score,
+    allowing for different emphasis on ranking-based vs distance-based metrics.
+
+    Args:
+        embedding (EmbeddingState): An EmbeddingState object containing the computed metrics
+            'rank_score' and 'distance_score'.
+        balance (float): Weight for the rank score in the range [0, 1]. The distance
+            score gets weight (1 - balance). Default is 0.5 for equal weighting.
+
+    Returns:
+        float: The total score as a float between 0 and 1, where 1 is perfect.
+
+    Raises:
+        ValueError: If any of the required metrics ('rank_score',
+            'distance_score') are missing from the embedding's metrics dictionary.
+    """
     required_keys = ["rank_score", "distance_score"]
     if not all(metric in embedding.metrics for metric in required_keys):
         raise ValueError(
@@ -204,6 +390,48 @@ def compute_metrics(
     inplace: bool = False,
     verbose: bool = False,
 ) -> list[EmbeddingState]:
+    """Compute comprehensive evaluation metrics for dimensionality reduction embeddings.
+
+    This function computes various quality metrics for dimensionality reduction
+    including ranking-based metrics (trustworthiness, continuity, RNX) and
+    distance-based metrics (stress measures). The metrics are computed for each
+    embedding and stored in their respective metrics dictionaries.
+
+    The co-ranking matrix computation and associated metrics are adapted from
+    the pyDRMetrics package by Yinsheng Zhang [1], with modifications to compute
+    AUC metrics only when needed for improved runtime efficiency.
+
+    Args:
+        highdim_df (pd.DataFrame): DataFrame containing the original high-dimensional data.
+        embeddings (list[EmbeddingState]): List of EmbeddingState objects to evaluate.
+        target_features (list[str]): List of feature names in highdim_df to use
+            for similarity calculations.
+        fixed_k (int | None): If specified, compute ranking metrics only for this neighborhood
+            size. If None, compute AUC (average) over all possible k values.
+        ranking_metrics (bool): Whether to compute ranking-based metrics (trustworthiness,
+            continuity, RNX). Default is True.
+        distance_metrics (bool): Whether to compute distance-based metrics (stress).
+            Default is True.
+        inplace (bool): Whether to modify embeddings in-place or create deep copies.
+            Default is False (creates copies).
+        verbose (bool): Whether to print progress information. Default is False.
+
+    Returns:
+        list[EmbeddingState]: List of EmbeddingState objects with computed metrics. If inplace=False,
+        these are deep copies of the input embeddings.
+
+    Notes:
+        - Community-based stress metrics require partitions to be defined in
+          the embeddings.
+        - The reference embedding for community stress differences is taken
+          from the first embedding in the list.
+
+    References:
+        Zhang, Y. pyDRMetrics: A Python package for dimensionality reduction
+        quality metrics. https://github.com/zhangys11/pyDRMetrics
+        Licensed under Creative Commons Attribution 4.0 International (CC BY 4.0).
+        https://creativecommons.org/licenses/by/4.0/
+    """
     if not inplace:
         for i, emb in enumerate(embeddings):
             embeddings[i] = copy.deepcopy(emb)
@@ -225,13 +453,6 @@ def compute_metrics(
             print("------------------------------------------------------------")
             print(f"Computing global metrics for embedding: `{emb.title}'.")
             start_time = time.time()
-
-        # The computation of the co-ranking matrix and its associated metrics is adapted from the
-        # pyDRMetrics package (https://github.com/zhangys11/pyDRMetrics) by Yinsheng Zhang (oo@zju.edu.cn / zhangys@illinois.edu)
-        # Original code licensed under Creative Commons Attribution 4.0 International (CC BY 4.0)
-        # See: https://creativecommons.org/licenses/by/4.0/
-        # Changes: Only compute the AUC of the metrics if needed,
-        # not automatically while computing the co-ranking matrix (for runtime efficiency).
 
         # compute pairwise distances + ranking matrix for lowdim data
         lowdim_df = pd.DataFrame(emb.embedding.values(), index=None)
@@ -327,6 +548,32 @@ def compute_metrics(
 def create_report(
     embeddings: list[EmbeddingState], metadata: bool = True, metrics: bool = True
 ) -> pd.DataFrame:
+    """Create a DataFrame report from a list of EmbeddingState objects.
+
+    This function extracts metadata and/or metrics from EmbeddingState objects
+    and creates a structured DataFrame for analysis and comparison.
+
+    Args:
+        embeddings (list[EmbeddingState]): List of EmbeddingState objects to include in the report.
+        metadata (bool): Whether to include metadata columns in the report.
+            Default is True.
+        metrics (bool): Whether to include metrics columns in the report.
+            Default is True.
+
+    Returns:
+        pd.DataFrame: A pandas DataFrame containing the requested information from all
+        embeddings. The 'coranking_matrix' metric is excluded from the
+        output as it is not suitable for tabular representation.
+
+    Raises:
+        ValueError: If both metadata and metrics are False, or if the
+            embeddings list is empty.
+
+    Notes:
+        - Each row in the DataFrame represents one embedding.
+        - The 'obj_id' column is always included to identify embeddings.
+        - The co-ranking matrix is excluded from metrics output due to size.
+    """
     if not metadata and not metrics:
         raise ValueError("At least one of `metadata` or `metrics` must be True.")
 

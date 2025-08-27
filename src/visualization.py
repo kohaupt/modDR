@@ -4,13 +4,8 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
-import numpy.typing as npt
 import pandas as pd
 import seaborn as sb
-from numpy.typing import ArrayLike
-from scipy.spatial.distance import pdist
-from sklearn.isotonic import IsotonicRegression
-from sklearn.preprocessing import MinMaxScaler
 
 import processing
 from embeddingstate import EmbeddingState
@@ -30,6 +25,32 @@ def display_embeddings(
     node_color_attribute: str | None = None,
     node_label_attribute: str | None = None,
 ) -> plt.Figure:
+    """Display multiple embeddings as network graphs in a subplot grid.
+
+    This function creates a visualization of multiple EmbeddingState objects,
+    showing nodes, edges, and various attributes in a customizable grid layout.
+
+    Args:
+        embeddings (list[EmbeddingState]): List of EmbeddingState objects to visualize.
+        figsize_columns (int): Number of columns in the subplot grid. Default is 2.
+        figsize (tuple[int, int]): Size of each individual subplot (width, height).
+            Default is (15, 15).
+        show_edges (bool): Whether to display edges based on the graph of the EmbeddingState. Default is True.
+        node_cmap (plt.cm): Colormap for node colors. Default is plt.cm.viridis.
+        edge_cmap (plt.cm): Colormap for edge colors. Default is plt.cm.viridis.
+        show_edge_cbar (bool): Whether to show colorbar for edge weights. Default is False.
+        show_node_cbar (bool): Whether to show colorbar for node colors. Default is False.
+        show_title (bool): Whether to display titles for each subplot. Default is True.
+        show_community_centers (bool): Whether to display community centers as larger nodes.
+            Default is False.
+        node_color_attribute (str | None): Graph node attribute to use for node coloring.
+            If None, tries to use labels from EmbeddingState. Otherwise, falls back to default colors. Default is None.
+        node_label_attribute (str | None): Graph node attribute to use for node labels.
+            Use "id" for node IDs or specify custom attribute name. Default is None.
+
+    Returns:
+        plt.Figure: matplotlib Figure object containing the visualization.
+    """
     # compute figure sizes and create subplots
     figsize_rows = math.ceil(len(embeddings) / figsize_columns)
     fig_width = figsize_columns * figsize[0]
@@ -72,18 +93,18 @@ def display_embeddings(
                     node_colors = [0] * graph.number_of_nodes()
 
             # add partition centers to graph and positions
-            if show_community_centers and embeddings[i].partition_centers is not None:
+            if show_community_centers and embeddings[i].community_centers is not None:
                 start_idx = len(graph.nodes())
-                end_idx = len(graph.nodes()) + len(embeddings[i].partition_centers)
+                end_idx = len(graph.nodes()) + len(embeddings[i].community_centers)
                 node_idx = list(range(start_idx, end_idx))
                 graph.add_nodes_from(node_idx)
 
-                node_colors += [0] * len(embeddings[i].partition_centers)
-                node_sizes += [140] * len(embeddings[i].partition_centers)
+                node_colors += [0] * len(embeddings[i].community_centers)
+                node_sizes += [140] * len(embeddings[i].community_centers)
 
                 center_dict = dict(
                     zip(
-                        node_idx, embeddings[i].partition_centers.values(), strict=False
+                        node_idx, embeddings[i].community_centers.values(), strict=False
                     )
                 )
                 positions.update(center_dict)
@@ -189,6 +210,37 @@ def plot_community_graphs(
     node_color_attribute: str | None = None,
     node_label_attribute: str | None = None,
 ) -> plt.Figure:
+    """Display community-focused visualizations of embeddings.
+
+    This function creates visualizations that emphasize community structure,
+    allowing filtering by specific communities and showing boundary connections.
+
+    Args:
+        embeddings (list[EmbeddingState]): List of EmbeddingState objects to visualize.
+        figsize_columns (int): Number of columns in the subplot grid. Default is 2.
+        figsize (tuple[int, int]): Size of each individual subplot (width, height).
+            Default is (15, 15).
+        node_cmap (plt.cm): Colormap for node colors. Default is plt.cm.viridis.
+        edge_cmap (plt.cm): Colormap for edge colors. Default is plt.cm.viridis.
+        only_communities (bool): If True, show only specified communities in community_ids.
+            If False, show all nodes with highlighted communities. Default is False.
+        community_ids (list[int] | None): List of specific community IDs to display.
+            If None and only_communities=True, shows all communities. Default is None.
+        show_boundary_edges (bool): Whether to include edges connecting to nodes
+            outside each community. Default is False.
+        unify_edge_colors (bool): If True, color edges by source node community.
+            If False, use edge weights for coloring. Default is False.
+        show_title (bool): Whether to display titles for each subplot. Default is True.
+        show_community_centers (bool): Whether to display community centers as larger nodes.
+            Default is False.
+        node_color_attribute (str | None): Graph node attribute to use for node coloring.
+            Default is None.
+        node_label_attribute (str | None): Graph node attribute to use for node labels.
+            Default is None.
+
+    Returns:
+        plt.Figure: matplotlib Figure object containing the community visualization.
+    """
     if only_communities and community_ids is None:
         print("WARNING: Community IDs not specified. Plotting all communities.")
 
@@ -291,16 +343,16 @@ def plot_community_graphs(
                     node_colors_dict = {n: 0 for n in graph.nodes()}
 
             # add partition centers to graph and positions
-            if show_community_centers and embeddings[i].partition_centers is not None:
+            if show_community_centers and embeddings[i].community_centers is not None:
                 if emb_community_ids is None:
                     partition_center_ids = list(embeddings[i].partition.keys())
                 else:
                     partition_center_ids = emb_community_ids
 
                 filtered_centers = {
-                    cid: embeddings[i].partition_centers[cid]
+                    cid: embeddings[i].community_centers[cid]
                     for cid in partition_center_ids
-                    if cid in embeddings[i].partition_centers
+                    if cid in embeddings[i].community_centers
                 }
 
                 start_idx = len(graph.nodes())
@@ -382,18 +434,45 @@ def plot_metrics_report(
     division_label: str | None = None,
     label_height: float = 0.1,
 ) -> plt.Figure:
+    """Create a line plot visualization of metrics across different embeddings.
+
+    This function generates a comprehensive metrics report showing how different
+    evaluation metrics vary across embedding objects, with optional grouping
+    by parameter divisions.
+
+    Args:
+        data_df (pd.DataFrame): DataFrame containing metrics data. Must include 'obj_id'
+            column and numeric metric columns.
+        division (list[any] | None): List of division values to group embeddings
+            (e.g., resolution parameters). Length should match the number of embedding
+            groups. Default is None.
+        division_label (str | None): Label for the division parameter (e.g., "Resolution").
+            Required if division is provided. Default is None.
+        label_height (float): Vertical position for division labels on the plot.
+            Default is 0.1.
+
+    Returns:
+        plt.Figure: matplotlib Figure object containing the metrics visualization.
+
+    Raises:
+        ValueError: If input validation fails.
+
+    Notes:
+        - The function automatically adds background shading for different
+          parameter groups when division is provided.
+        - Each metric is plotted with a unique marker and color.
+        - The plot includes grid lines and a legend positioned outside the plot area.
+    """
     if data_df.empty:
-        print("WARNING: DataFrame is empty.")
-        return plt.Figure()
+        raise ValueError("WARNING: DataFrame is empty.")
     if "obj_id" not in data_df.columns:
-        print("WARNING: 'obj_id' column not found in DataFrame.")
-        return plt.Figure()
+        raise ValueError("WARNING: 'obj_id' column not found in DataFrame.")
     if data_df.select_dtypes(include="number").shape[1] != data_df.shape[1]:
-        print("WARNING: DataFrame contains non-numeric columns.")
-        return plt.Figure()
+        raise ValueError("WARNING: DataFrame contains non-numeric columns.")
     if division is not None and division_label is None:
-        print("WARNING: 'division_label' must be provided if 'division' is specified.")
-        return plt.Figure()
+        raise ValueError(
+            "WARNING: 'division_label' must be provided if 'division' is specified."
+        )
 
     df_melted = data_df.melt(id_vars="obj_id", var_name="Metric", value_name="Score")
     metrics = data_df.columns.drop("obj_id")
@@ -483,6 +562,35 @@ def plot_pos_movements(
     show_title: bool = True,
     node_cmap: plt.cm = plt.cm.viridis,
 ) -> plt.Figure:
+    """Visualize node position movements between two embeddings using arrows.
+
+    This function creates a quiver plot showing how node positions change
+    from a reference embedding to a target embedding, useful for analyzing
+    the effects of layout algorithms or parameter changes.
+
+    Args:
+        reference (EmbeddingState): Source EmbeddingState showing initial positions.
+        target (EmbeddingState): Target EmbeddingState showing modified positions.
+        figsize (tuple[int, int]): Figure size (width, height). Default is (15, 15).
+        filtered_communities (list[int] | None): List of community IDs to focus on.
+            If None, shows movements for all nodes. Default is None.
+        community_colors (bool): Whether to color arrows by target community membership.
+            Default is False.
+        community_centers (bool): Whether to display community centers as black dots.
+            Default is False.
+        plot_target_nodes (bool): Whether to show target node positions as scatter points.
+            Default is False.
+        show_title (bool): Whether to display a descriptive title. Default is True.
+        node_cmap (plt.cm): Colormap for arrow and node colors. Default is plt.cm.viridis.
+
+    Returns:
+        plt.Figure: matplotlib Figure object containing the movement visualization.
+
+    Notes:
+        - Arrows point from reference positions to target positions.
+        - Arrow length is scaled down when plot_target_nodes=True to avoid overlap.
+        - The plot automatically adjusts axis limits to show all movements.
+    """
     source_dict = dict(sorted(reference.embedding.items()))
     target_dict = dict(sorted(target.embedding.items()))
 
@@ -559,11 +667,11 @@ def plot_pos_movements(
     if community_centers:
         # plot all community centers if no communities are filtered
         if filtered_communities is None:
-            coords_community_centers = list(target.partition_centers.values())
+            coords_community_centers = list(target.community_centers.values())
         else:
             coords_community_centers = [
                 coords
-                for community, coords in target.partition_centers.items()
+                for community, coords in target.community_centers.items()
                 if community in filtered_communities
             ]
 
@@ -602,63 +710,3 @@ def plot_pos_movements(
     plt.show()
 
     return fig
-
-
-def compute_shepard_curve(
-    original_similarities: ArrayLike, transformed_similarities: ArrayLike
-) -> tuple[list[float], npt.NDArray[np.float32]]:
-    # Sort values based on transformed similarities
-    sorted_indices = np.argsort(transformed_similarities)
-    sorted_transformed = transformed_similarities[sorted_indices]
-    sorted_original = original_similarities[sorted_indices]
-
-    # Apply isotonic regression to enforce monotonicity
-    iso_reg = IsotonicRegression(increasing=True)
-    shepard_curve = iso_reg.fit_transform(sorted_transformed, sorted_original)
-
-    return sorted_transformed.tolist(), shepard_curve
-
-
-def plot_shepard_diagram(
-    highdim_df: pd.DataFrame,
-    embedding: EmbeddingState,
-    target_features: list[str],
-    show_stress: bool = True,
-) -> None:
-    highdim_df_filtered = highdim_df[target_features].values.reshape(-1, 1)
-
-    sim_highdim = pdist(highdim_df_filtered)
-    sim_lowdim = pdist(np.array(list(embedding.embedding.values())))
-
-    scaler = MinMaxScaler()
-    sim_highdim = scaler.fit_transform(sim_highdim.reshape(-1, 1)).flatten()
-    sim_lowdim = scaler.fit_transform(sim_lowdim.reshape(-1, 1)).flatten()
-
-    sim_data_df = pd.DataFrame(
-        {
-            "Transformed Similarity": sim_lowdim,
-            "Original Similarity": sim_highdim,
-        }
-    )
-
-    # Plot the Shepard diagram using Seaborn
-    fig = sb.jointplot(
-        x="Transformed Similarity",
-        y="Original Similarity",
-        data=sim_data_df,
-        kind="hist",
-    )
-
-    ax = fig.ax_joint
-    # sb.lineplot(x=[0, 1], y=[0, 1], color="red", linestyle="--")
-    ax.plot([0, 1], [0, 1], color="red", linestyle="--")
-
-    if show_stress:
-        shepard_x, shepard_y = compute_shepard_curve(
-            sim_data_df["Original Similarity"], sim_data_df["Transformed Similarity"]
-        )
-        # sb.lineplot(x=shepard_x, y=shepard_y, color="blue")
-        ax.plot(shepard_x, shepard_y, color="blue")
-
-    plt.suptitle(f"Shepard Diagram: Similarity for '{str(target_features)}'", y=1.02)
-    plt.show()

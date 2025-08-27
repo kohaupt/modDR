@@ -26,17 +26,51 @@ def run_pipeline(
     dr_param_n_neigbors: int = 15,
     graph_method: str = "DR",
     community_resolutions: list[float] = None,
-    community_resolution_amount: int = 3,
+    community_resolution_amount: int = 5,
     layout_method: str = "MDS",
     boundary_neighbors: bool = False,
     layout_params: list[int] | None = None,
     compute_metrics: bool = True,
     verbose: bool = False,
 ) -> list[EmbeddingState]:
-    """
-    Run the modDR pipeline for dimensionality reduction and community detection.
-    """
+    """Run the complete modDR (modified Dimensionality Reduction) pipeline.
 
+    This function orchestrates the entire pipeline including dimensionality reduction,
+    feature similarity computation, graph construction, community detection, and
+    position refinement using various layout algorithms.
+
+    Args:
+        data (pd.DataFrame): Input DataFrame containing the high-dimensional data.
+        sim_features (list[str]): List of feature column names to use for similarity computation.
+        dr_method (str): Dimensionality reduction method. Currently only "UMAP" is supported.
+            Default is "UMAP".
+        dr_param_n_neigbors (int): Number of neighbors parameter for the DR method.
+            Default is 15.
+        graph_method (str): Graph construction method. Either "DR" (use DR graph) or "KNN" (use KNN graph based on feature similarity).
+            Default is "DR".
+        community_resolutions (list[float] | None): List of resolution parameters for community detection.
+            If None, automatic resolutions are computed based on the minimum and maximum edge weights. Default is None.
+        community_resolution_amount (int): Number of resolution values to use if
+            community_resolutions is None. Has no effect if community_resolutions is set. Default is 3.
+        layout_method (str): Layout method for position refinement.
+            Options: "MDS" (Multidimensional Scaling), "KK" (Kamada-Kawai), "FR" (Fruchterman-Reingold). Default is "MDS".
+        boundary_neighbors (bool): Whether to include boundary edges in layout computation.
+            Default is False.
+        layout_params (list[int] | None): Parameter values for the layout method. Iterations for FR,
+            balance factors for MDS/KK. If None, defaults are used ([1, 10, 100, 1000] for FR,
+            [0.2, 0.4, 0.6, 0.8, 1.0] for KK/MDS). Default is None.
+        compute_metrics (bool): Whether to compute evaluation metrics for embeddings.
+            Default is True.
+        verbose (bool): Whether to print detailed progress information. Default is False.
+
+    Returns:
+        list[EmbeddingState]: List of EmbeddingState objects containing the processed embeddings with
+        different community resolutions and layout parameters.
+
+    Raises:
+        ValueError: If unsupported methods are specified or invalid parameters
+            are provided.
+    """
     if verbose:
         print("------------------------------------------------------------")
         print(
@@ -93,7 +127,7 @@ def run_pipeline(
             f"Method '{graph_method}' is not supported. Currently, only 'DR' and 'KNN' are available."
         )
 
-    # 4. Step: community detection & position refinement
+    # 4. Step: community detection (compute resolution parameters)
     weights = list(nx.get_edge_attributes(reference.graph, "weight", 1).values())
     min_w, max_w = min(weights), max(weights)
 
@@ -131,11 +165,12 @@ def run_pipeline(
     id_counter = 1
 
     for resolution in community_resolutions:
-        # compute the partition for the current resolution
+        # 4. Step: community detection (compute actual partition)
         partition_embedding = community_detection_leiden(
             reference, resolution_parameter=resolution, verbose=verbose
         )
 
+        # 5. Step: position refinement (compute modified positions)
         # for FR layout, iterate over iteration parameters in layout_params
         if layout_method == "FR":
             if layout_params is None:
@@ -152,7 +187,7 @@ def run_pipeline(
 
                 modified_embedding, _ = compute_modified_positions(
                     modified_embedding,
-                    target_dists=pairwise_sims,
+                    targets=pairwise_sims,
                     layout_method=layout_method,
                     layout_param=param,
                     boundary_neighbors=boundary_neighbors,
@@ -179,7 +214,7 @@ def run_pipeline(
             # also saves full modified positions (balance factor=1) for future use
             modified_embedding, full_modified_positions = compute_modified_positions(
                 modified_embedding,
-                target_dists=pairwise_sims,
+                targets=pairwise_sims,
                 layout_method=layout_method,
                 layout_param=layout_params[0],
                 boundary_neighbors=boundary_neighbors,
@@ -218,7 +253,7 @@ def run_pipeline(
             )
 
     if compute_metrics:
-        # 5.1 Step: compute global metrics
+        # 6. Step: compute metrics
         evaluation.compute_metrics(
             data,
             embeddings,
@@ -236,52 +271,6 @@ def run_pipeline(
     return embeddings
 
 
-def dimensionality_reduction_param_search(
-    data: pd.DataFrame, method: str = "UMAP"
-) -> tuple[list[EmbeddingState], int]:
-    """
-    1. Step of the modDR pipeline: Dimensionality Reduction.
-    """
-    embeddings = []
-
-    if method == "UMAP":
-        # set parameters for UMAP, add custom n-neighbors value depending on data size
-        params_n_neigbors_fixed = {10, 15, 20, 50, 100}
-        params_n_neigbors_data = {data.shape[0] / 80, data.shape[0] / 40}
-
-        params_n_neigbors = list(params_n_neigbors_fixed.union(params_n_neigbors_data))
-        param_min_dist = 1
-        random_state = 0
-
-        for current_n_neigbors in params_n_neigbors:
-            emb = dimensionality_reduction_umap(
-                data,
-                n_neighbors=current_n_neigbors,
-                min_dist=param_min_dist,
-                random_state=random_state,
-                compute_metrics=False,
-            )
-            embeddings.append(emb)
-    else:
-        raise ValueError(
-            f"Method '{method}' is not supported. Currently, only 'UMAP' is available."
-        )
-
-    embeddings = evaluation.compute_metrics(
-        data, embeddings, [], distance_metrics=False
-    )
-
-    recommended_embedding_idx = 0
-    for i in range(1, len(embeddings) - 1):
-        if (
-            embeddings[recommended_embedding_idx].m_global_rank_score
-            > embeddings[i].m_global_rank_score
-        ):
-            recommended_embedding_idx = i
-
-    return embeddings, recommended_embedding_idx
-
-
 def dimensionality_reduction_umap(
     data: pd.DataFrame,
     n_neighbors: int = 15,
@@ -289,10 +278,24 @@ def dimensionality_reduction_umap(
     random_state: int = 0,
     compute_metrics: bool = False,
 ) -> EmbeddingState:
-    """
-    1. Step of the modDR pipeline: Dimensionality Reduction.
-    """
+    """Perform dimensionality reduction using UMAP.
 
+    Creates an EmbeddingState object with the resulting embedding and the UMAP-generated graph structure.
+
+    Args:
+        data (pd.DataFrame): Input DataFrame containing the high-dimensional data.
+        n_neighbors (int): Number of nearest neighbors to consider for UMAP.
+            Controls the balance between local and global structure. Default is 15.
+        min_dist (float): Minimum distance parameter for UMAP. Controls how
+            tightly UMAP packs points together. Default is 1.0.
+        random_state (int): Random seed for reproducible results. Default is 0.
+        compute_metrics (bool): Whether to compute evaluation metrics for the
+            resulting embedding. Default is False.
+
+    Returns:
+        EmbeddingState: EmbeddingState object containing the 2D embedding coordinates,
+        the UMAP-generated graph, and associated metadata.
+    """
     warnings.filterwarnings(
         "ignore",
         message="n_jobs value 1 overridden to 1 by setting random_state. Use no seed for parallelism.",
@@ -336,12 +339,38 @@ def compute_pairwise_dists(
     no_null: bool = False,
     sim_features: list[str] | None = None,
 ) -> npt.NDArray[np.float32]:
-    """
-    2. Step of the modDR pipeline: Feature Similarity Computation.
+    """Compute pairwise Euclidean distances between data points.
+
+    This function calculates pairwise distances between all data points,
+    with various options for processing and transforming the distances.
+
+    Args:
+        df (pd.DataFrame): Input DataFrame containing the data points.
+        apply_squareform (bool): Whether to convert condensed distance matrix to
+            square form. If False, returns condensed form. Default is True.
+        invert (bool): Whether to invert the distances. Uses 1/d if normalize=False,
+            or 1-d if normalize=True. Default is False.
+        normalize (bool): Whether to normalize distances to [0, 1] range using
+            MinMaxScaler. Default is False.
+        no_null (bool): Whether to replace zero distances with a small value (1e-9)
+            to avoid division by zero. Default is False.
+        sim_features (list[str] | None): List of feature column names to use for distance
+            computation. If None, uses all columns. Default is None.
+
+    Returns:
+        npt.NDArray[np.float32]: Array of pairwise distances as float32. Shape depends on
+        apply_squareform parameter.
+
+    Raises:
+        ValueError: If the input DataFrame is empty or if the provided
+            sim_features are not in the DataFrame.
     """
     input_data = []
 
     if sim_features is not None and sim_features != []:
+        if not all(feature in df.columns for feature in sim_features):
+            raise ValueError("Not all specified sim_features are in the DataFrame.")
+
         input_data = df[sim_features].to_numpy()
     else:
         input_data = df.to_numpy()
@@ -381,11 +410,38 @@ def assign_graph_edge_weights(
     inplace: bool = False,
     verbose: bool = False,
 ) -> EmbeddingState:
-    """
-    3. Step of the modDR pipeline: Graph Construction via Feature Similarity.
+    """Assign edge weights to a graph based on a similarity matrix.
+
+    This function sets the 'weight' attribute of each edge in the embedding's
+    graph to the corresponding similarity value from the similarity matrix.
+
+    Args:
+        embedding (EmbeddingState): EmbeddingState object containing the graph to modify.
+        similarity_matrix (npt.NDArray[np.float32]): Square matrix containing similarity values between
+            nodes. Matrix should be indexed by node IDs.
+        inplace (bool): Whether to modify the embedding in-place or create a copy.
+            Default is False.
+        verbose (bool): Whether to print progress information. Default is False.
+
+    Returns:
+        EmbeddingState: EmbeddingState object with updated edge weights. If inplace=False,
+        returns a deep copy of the input embedding.
+
+    Raises:
+        ValueError: If the embedding object doesn't have a graph or if the
+            similarity matrix is not suitable (e.g., not square or different
+            shape than the graph).
     """
     if embedding.graph is None:
         raise ValueError("Embedding object must have a similarity graph.")
+
+    if similarity_matrix.shape[0] != similarity_matrix.shape[1]:
+        raise ValueError("Similarity matrix must be square.")
+
+    if similarity_matrix.shape[0] != embedding.graph.number_of_nodes():
+        raise ValueError(
+            "Similarity matrix must match the number of nodes in the graph."
+        )
 
     if verbose:
         print("------------------------------------------------------------")
@@ -396,10 +452,8 @@ def assign_graph_edge_weights(
     if not inplace:
         embedding = copy.deepcopy(embedding)
 
-    edge_weights = []
     for u, v in embedding.graph.edges():
         embedding.graph[u][v]["weight"] = similarity_matrix[u][v]
-        edge_weights.append(similarity_matrix[u][v])
 
     if verbose:
         print(
@@ -416,9 +470,34 @@ def community_detection_leiden(
     inplace: bool = False,
     verbose: bool = False,
 ) -> EmbeddingState:
+    """Perform community detection using the Leiden algorithm.
+
+    This function applies the Leiden algorithm for community detection on the
+    embedding's graph, using edge weights and a specified resolution parameter.
+    The detected communities are stored in the embedding's partition attribute
+    and as node attributes in the graph.
+
+    Uses igraph for community detection, as networkx does not support a
+    native implementation of the Leiden algorithm.
+
+    Args:
+        embedding (EmbeddingState): EmbeddingState object containing the graph for community detection.
+        resolution_parameter (float): Resolution parameter controlling the granularity of
+            communities. Higher values lead to smaller, more communities.
+        inplace (bool): Whether to modify the embedding in-place or create a copy.
+            Default is False.
+        verbose (bool): Whether to print progress information. Default is False.
+
+    Returns:
+        EmbeddingState: EmbeddingState object with detected communities. If inplace=False,
+        returns a deep copy of the input embedding.
+
+    Raises:
+        ValueError: If the embedding object doesn't have a graph.
     """
-    4.1 Step of the modDR pipeline: Community Detection via Leiden.
-    """
+
+    if embedding.graph is None:
+        raise ValueError("Embedding object must have a similarity graph.")
 
     if verbose:
         print("------------------------------------------------------------")
@@ -431,7 +510,6 @@ def community_detection_leiden(
     if not inplace:
         embedding = copy.deepcopy(embedding)
 
-    # use igraph for community detection, as networkx does not support a native implementation of the Leiden algorithm
     graph_igraph = Graph.from_networkx(embedding.graph)
     partition = la.find_partition(
         graph_igraph,
@@ -470,10 +548,28 @@ def apply_balance_factor(
     inplace: bool = False,
     verbose: bool = False,
 ) -> EmbeddingState:
-    """
-    Apply a balance factor to the embedding positions.
-    """
+    """Apply a balance factor to blend original and modified positions.
 
+    This function creates a weighted combination of the original embedding
+    positions and new modified positions using a balance factor.
+
+    Args:
+        embedding (EmbeddingState): EmbeddingState object containing the original positions.
+        modified_positions (npt.NDArray[np.float32]): Array of new positions to blend with originals.
+        balance_factor (float): Weight for the modified positions (0-1).
+            0 = only original positions, 1 = only modified positions.
+        inplace (bool): Whether to modify the embedding in-place or create a copy.
+            Default is False.
+        verbose (bool): Whether to print progress information. Default is False.
+
+    Returns:
+        EmbeddingState: EmbeddingState object with blended positions. If inplace=False,
+        returns a deep copy of the input embedding.
+
+    Raises:
+        ValueError: If embedding has no positions, modified_positions is None,
+            lengths don't match, or balance_factor is not in [0, 1].
+    """
     if verbose:
         print(
             f"Applying balance factor {balance_factor} for embedding: `{embedding.title}'."
@@ -513,16 +609,38 @@ def compute_modified_positions(
     embedding: EmbeddingState,
     layout_param: int | float,
     layout_method: str,
-    layout_scale: int = 1,
+    targets: npt.NDArray[np.float32],
     boundary_neighbors: bool = False,
-    target_dists: npt.NDArray[np.float32] | None = None,
     inplace: bool = False,
     verbose: bool = False,
 ) -> tuple[EmbeddingState, npt.NDArray[np.float32]]:
-    """
-    4.2 Step of the modDR pipeline: Position refinement via kamada-kawai layouting.
-    """
+    """Compute new positions for an embedding using various layout algorithms.
 
+    This function applies different layout algorithms (Kamada-Kawai, MDS, or
+    Fruchterman-Reingold) to modify node positions within detected communities
+    while taking into account the original structure.
+
+    Args:
+        embedding (EmbeddingState): EmbeddingState object with computed partition.
+        layout_param (int | float): Algorithm-specific parameter. For FR: iterations,
+            for KK/MDS: balance factor.
+        layout_method (str): Layout algorithm to use ("KK", "MDS", or "FR").
+        targets (npt.NDArray[np.float32]): Target distance matrix for KK/MDS algorithms.
+            Target similarity matrix for FR algorithm.
+        boundary_neighbors (bool): Whether to include boundary neighbors between communities.
+            Default is False.
+        inplace (bool): Whether to modify the embedding in-place. Default is False.
+        verbose (bool): Whether to print progress information. Default is False.
+
+    Returns:
+        tuple[EmbeddingState, npt.NDArray[np.float32]]: Tuple containing:
+        - Modified EmbeddingState object
+        - Array of modified positions as computed by the layout algorithm (w/o balance factor influence)
+
+    Raises:
+        ValueError: If unsupported layout method is specified or required
+            parameters are missing or invalid.
+    """
     if not inplace:
         embedding = copy.deepcopy(embedding)
 
@@ -535,34 +653,27 @@ def compute_modified_positions(
     partition_subgraphs, partition_centers, partition_boundary_neighbors = (
         compute_community_graphs(embedding, boundary_neighbors=boundary_neighbors)
     )
-    embedding.partition_centers = partition_centers
+    embedding.community_centers = partition_centers
 
     # safes modified positions w/o balance factor influence (i.e. balance factor=1)
     computed_positions = None
 
-    # scale pairwise distances for layout methods which are based on target_dists
+    # scale pairwise distances for layout methods which are based on targets
     if layout_method == "KK" or layout_method == "MDS":
-        if target_dists is None:
-            raise ValueError(
-                "Pairwise distances must be provided for Kamada Kawai or MDS layouting."
-            )
-
         embedding_df = pd.DataFrame(embedding.embedding.values(), index=None)
         embedding_dists = compute_pairwise_dists(
             embedding_df,
             apply_squareform=False,
         )
 
-        target_scaling = compute_distance_scaling(
-            embedding_dists, squareform(target_dists)
-        )
-        target_dists = target_dists * target_scaling
+        target_scaling = compute_distance_scaling(embedding_dists, squareform(targets))
+        targets = targets * target_scaling
 
     if layout_method == "KK":
         embedding, computed_positions = compute_kamada_kawai_layout(
             embedding,
             partition_subgraphs,
-            target_dists,
+            targets,
             balance_factor=layout_param,
             boundary_neighbors=partition_boundary_neighbors
             if boundary_neighbors
@@ -578,7 +689,7 @@ def compute_modified_positions(
         embedding, computed_positions = compute_mds_layout(
             embedding,
             partition_subgraphs,
-            target_dists,
+            targets,
             balance_factor=layout_param,
             boundary_neighbors=partition_boundary_neighbors
             if boundary_neighbors
@@ -594,7 +705,7 @@ def compute_modified_positions(
         embedding = compute_fruchterman_reingold_layout(
             embedding,
             partition_subgraphs,
-            scale=layout_scale,
+            pairwise_sims=targets,
             iterations=layout_param,
             boundary_neighbors=partition_boundary_neighbors
             if boundary_neighbors
@@ -625,62 +736,6 @@ def compute_modified_positions(
     return embedding, computed_positions
 
 
-def compute_distance_scaling(
-    dists_highdim: npt.NDArray[np.float32], dists_lowdim: npt.NDArray[np.float32]
-) -> float:
-    if dists_highdim.shape != dists_lowdim.shape:
-        raise ValueError(
-            f"Shape mismatch (dists_highdim.shape={dists_highdim.shape}, dists_lowdim.shape={dists_lowdim.shape}): "  # noqa: E501
-            f"Both arrays must have the same shape."
-        )
-
-    # convert to vector form if necessary as distances must not be used more than once
-    if dists_highdim.ndim != 1:
-        dists_highdim = squareform(dists_highdim)
-
-    if dists_lowdim.ndim != 1:
-        dists_lowdim = squareform(dists_lowdim)
-
-    if not dists_highdim.any():
-        print("WARNING: Highdim distances are all 0. Returning 1 as scaling factor.")
-        return 1.0
-
-    numerator = np.dot(dists_highdim, dists_lowdim)
-    denominator = np.dot(dists_lowdim, dists_lowdim)
-    return numerator / denominator
-
-
-def compute_community_graphs(
-    embedding: EmbeddingState, boundary_neighbors: bool = False
-) -> tuple[dict[int, nx.Graph], dict[int, tuple[float, float]], dict[int, list[Any]]]:
-    partition_subgraphs = {}
-    partition_centers = {}
-    partition_boundary_neighbors = {}
-
-    for part, nodes in embedding.partition.items():
-        # partition centers are based on median rather than min/max to avoid distortion from outliers
-        subgraph_points_coords = np.array([embedding.embedding[i] for i in nodes])
-        partition_centers[part] = np.median(subgraph_points_coords, axis=0)
-
-        subgraph = embedding.graph.subgraph(
-            [
-                node
-                for node, attrs_dict in embedding.graph.nodes(data=True)
-                if attrs_dict["community"] == part
-            ]
-        ).copy()
-
-        if boundary_neighbors:
-            subgraph, part_boundary_neighbors = add_boundary_edges(
-                embedding.graph, subgraph
-            )
-            partition_boundary_neighbors[part] = part_boundary_neighbors
-
-        partition_subgraphs[part] = subgraph
-
-    return partition_subgraphs, partition_centers, partition_boundary_neighbors
-
-
 def compute_kamada_kawai_layout(
     embedding: EmbeddingState,
     partition_subgraphs: dict[int, nx.Graph],
@@ -690,10 +745,28 @@ def compute_kamada_kawai_layout(
     inplace: bool = False,
     verbose: bool = False,
 ) -> tuple[EmbeddingState, dict[int, npt.NDArray[np.float32]]]:
-    """
-    4.3 Step of the modDR pipeline: Execute position-movement via Kamada Kawai-layouting.
-    """
+    """Apply Kamada-Kawai layout algorithm to community subgraphs.
 
+    This function applies the Kamada-Kawai force-directed algorithm to each
+    community separately, using target distances and a balance factor to
+    blend original and new positions.
+
+    Args:
+        embedding (EmbeddingState): EmbeddingState object with community partition.
+        partition_subgraphs (dict[int, nx.Graph]): Dictionary of community subgraphs.
+        pairwise_dists (npt.NDArray[np.float32]): Target distance matrix for the layout algorithm.
+        balance_factor (float): Weight for blending original and new positions (0-1).
+            Default is 0.5.
+        boundary_neighbors (dict[int, list[int]] | None): Dictionary of boundary neighbors for each community.
+            Default is None.
+        inplace (bool): Whether to modify the embedding in-place. Default is False.
+        verbose (bool): Whether to print progress information. Default is False.
+
+    Returns:
+        tuple[EmbeddingState, npt.NDArray[np.float32]]: Tuple containing:
+        - Modified EmbeddingState object
+        - Array of modified positions as computed by the layout algorithm (w/o balance factor influence)
+    """
     if not inplace:
         embedding = copy.deepcopy(embedding)
 
@@ -741,7 +814,7 @@ def compute_kamada_kawai_layout(
             part_graph,
             dist=subdist,
             pos=subgraph_pos,
-            center=embedding.partition_centers[part_key],
+            center=embedding.community_centers[part_key],
             scale=5,
         )
 
@@ -776,10 +849,28 @@ def compute_mds_layout(
     inplace: bool = False,
     verbose: bool = False,
 ) -> tuple[EmbeddingState, dict[int, npt.NDArray[np.float32]]]:
-    """
-    4.3 Step of the modDR pipeline: Execute position-movement via Kamada Kawai-layouting.
-    """
+    """Apply Multidimensional Scaling (MDS) layout to community subgraphs.
 
+    This function applies MDS to each community separately, using target
+    distances to compute new positions and a balance factor to blend
+    with original positions.
+
+    Args:
+        embedding (EmbeddingState): EmbeddingState object with community partition.
+        partition_subgraphs (dict[int, nx.Graph]): Dictionary of community subgraphs.
+        pairwise_dists (npt.NDArray[np.float32]): Target distance matrix for the MDS algorithm.
+        balance_factor (float): Weight for blending original and new positions (0-1).
+            Default is 0.5.
+        boundary_neighbors (dict[int, list[int]] | None): Dictionary of boundary neighbors for each community.
+            Default is None.
+        inplace (bool): Whether to modify the embedding in-place. Default is False.
+        verbose (bool): Whether to print progress information. Default is False.
+
+    Returns:
+        tuple[EmbeddingState, npt.NDArray[np.float32]]: Tuple containing:
+        - Modified EmbeddingState object
+        - Array of modified positions as computed by the layout algorithm (w/o balance factor influence)
+    """
     if not inplace:
         embedding = copy.deepcopy(embedding)
 
@@ -837,7 +928,7 @@ def compute_mds_layout(
         ).embedding_
 
         # shift new positions by partition center
-        new_pos += embedding.partition_centers[part_key]
+        new_pos += embedding.community_centers[part_key]
         new_post_dict = {node: new_pos[i] for i, node in enumerate(subgraph_pos)}
 
         if boundary_neighbors is not None:
@@ -866,16 +957,29 @@ def compute_fruchterman_reingold_layout(
     embedding: EmbeddingState,
     partition_subgraphs: dict[int, nx.Graph],
     pairwise_sims: npt.NDArray[np.float32],
-    scale: int,
     iterations: int,
     boundary_neighbors: dict[int, list[int]] | None = None,
     inplace: bool = False,
     verbose: bool = False,
 ) -> EmbeddingState:
-    """
-    4.3 Step of the modDR pipeline: Execute position-movement via Fruchterman-Reingold-layouting.
-    """
+    """Apply Fruchterman-Reingold layout to community subgraphs.
 
+    This function applies the Fruchterman-Reingold force-directed algorithm
+    to each community separately, using similarity values as edge weights.
+
+    Args:
+        embedding (EmbeddingState): EmbeddingState object with community partition.
+        partition_subgraphs (dict[int, nx.Graph]): Dictionary of community subgraphs.
+        pairwise_sims (npt.NDArray[np.float32]): Similarity matrix for edge weights.
+        iterations (int): Number of iterations to run the algorithm.
+        boundary_neighbors (dict[int, list[int]] | None): Dictionary of boundary neighbors for each community.
+            Default is None.
+        inplace (bool): Whether to modify the embedding in-place. Default is False.
+        verbose (bool): Whether to print progress information. Default is False.
+
+    Returns:
+        EmbeddingState: Modified EmbeddingState object with new positions.
+    """
     if not inplace:
         embedding = copy.deepcopy(embedding)
 
@@ -897,8 +1001,7 @@ def compute_fruchterman_reingold_layout(
             else None,
             threshold=0.0001,
             weight="weight",
-            center=embedding.partition_centers[part_key],
-            scale=scale,
+            center=embedding.community_centers[part_key],
             k=1.0,
             seed=0,
         )
@@ -913,9 +1016,118 @@ def compute_fruchterman_reingold_layout(
     return embedding
 
 
-def add_boundary_edges(
+def compute_distance_scaling(
+    dists_highdim: npt.NDArray[np.float32], dists_lowdim: npt.NDArray[np.float32]
+) -> float:
+    """Compute scaling factor to align high-dimensional and low-dimensional distances.
+
+    This function calculates the optimal scaling factor to multiply low-dimensional
+    distances to best match high-dimensional distances in a least-squares sense.
+
+    Args:
+        dists_highdim (npt.NDArray[np.float32]): Array of pairwise distances in high-dimensional space.
+            Can be square matrix or condensed vector.
+        dists_lowdim (npt.NDArray[np.float32]): Array of pairwise distances in low-dimensional space.
+            Can be square matrix or condensed vector. Must match shape of dists_highdim.
+
+    Returns:
+        float: Scaling factor as a float. If high-dimensional distances are all zero,
+        returns 1.0.
+
+    Raises:
+        ValueError: If the input arrays have different shapes.
+    """
+    if dists_highdim.shape != dists_lowdim.shape:
+        raise ValueError(
+            f"Shape mismatch (dists_highdim.shape={dists_highdim.shape}, dists_lowdim.shape={dists_lowdim.shape}): "  # noqa: E501
+            f"Both arrays must have the same shape."
+        )
+
+    # convert to vector form if necessary as distances must not be used more than once
+    if dists_highdim.ndim != 1:
+        dists_highdim = squareform(dists_highdim)
+
+    if dists_lowdim.ndim != 1:
+        dists_lowdim = squareform(dists_lowdim)
+
+    if not dists_highdim.any():
+        print("WARNING: Highdim distances are all 0. Returning 1 as scaling factor.")
+        return 1.0
+
+    numerator = np.dot(dists_highdim, dists_lowdim)
+    denominator = np.dot(dists_lowdim, dists_lowdim)
+    return numerator / denominator
+
+
+def compute_community_graphs(
+    embedding: EmbeddingState, boundary_neighbors: bool = False
+) -> tuple[dict[int, nx.Graph], dict[int, tuple[float, float]], dict[int, list[Any]]]:
+    """Extract subgraphs and compute centers for each community.
+
+    This function creates individual subgraphs for each community in the
+    embedding's partition and computes their centers based on node positions.
+
+    The center position is defined as the median of all node positions within
+    the community instead of bounding box centers to avoid distortions from outliers.
+
+    Args:
+        embedding (EmbeddingState): EmbeddingState object with detected communities.
+        boundary_neighbors (bool): Whether to include boundary nodes which are adjacent
+            to the current community. Default is False.
+
+    Returns:
+        tuple[dict[int, nx.Graph], dict[int, tuple[float, float]], dict[int, list[Any]]]: Tuple containing:
+        - Dictionary mapping community IDs to their subgraphs
+        - Dictionary mapping community IDs to their center coordinates
+        - Dictionary mapping community IDs to boundary neighbor lists
+    """
+    partition_subgraphs = {}
+    community_centers = {}
+    community_boundary_neighbors = {}
+
+    for part, nodes in embedding.partition.items():
+        # compute community centers
+        subgraph_points_coords = np.array([embedding.embedding[i] for i in nodes])
+        community_centers[part] = np.median(subgraph_points_coords, axis=0)
+
+        # create subgraph for the community
+        subgraph = embedding.graph.subgraph(
+            [
+                node
+                for node, attrs_dict in embedding.graph.nodes(data=True)
+                if attrs_dict["community"] == part
+            ]
+        ).copy()
+
+        if boundary_neighbors:
+            subgraph, part_boundary_neighbors = compute_boundary_subgraph(
+                embedding.graph, subgraph
+            )
+            community_boundary_neighbors[part] = part_boundary_neighbors
+
+        partition_subgraphs[part] = subgraph
+
+    return partition_subgraphs, community_centers, community_boundary_neighbors
+
+
+def compute_boundary_subgraph(
     graph: nx.Graph, subgraph: nx.Graph
 ) -> tuple[nx.Graph, list[Any]]:
+    """Compute the boundary subgraph by adding boundary nodes and edges.
+
+    This function identifies neighbors of subgraph nodes that lie outside
+    the subgraph and adds them as boundary nodes with their connecting edges.
+    Boundary nodes are those that are adjacent to the subgraph but not part of it.
+
+    Args:
+        graph (nx.Graph): The full graph containing all nodes and edges.
+        subgraph (nx.Graph): A subgraph extracted from the full graph.
+
+    Returns:
+        tuple[nx.Graph, list[Any]]: Tuple containing:
+        - Extended subgraph with boundary nodes and edges added
+        - List of boundary neighbor node IDs
+    """
     # actual subgraph with boundary nodes + edges
     subgraph_boundary_neighbors = subgraph.copy()
 
@@ -942,6 +1154,25 @@ def compute_knn_graph(
     mode: str = "distance",
     sim_features: list[str] | None = None,
 ) -> tuple[nx.Graph, npt.NDArray[np.float32]]:
+    """Compute a k-nearest neighbors graph from the input data.
+
+    This function creates a k-nearest neighbors graph using the specified
+    features and assigns edge weights based on pairwise distances.
+
+    Args:
+        df (pd.DataFrame): Input DataFrame containing the data points.
+        n_neighbors (int): Number of nearest neighbors to connect for each node.
+            Default is 15.
+        mode (str): Mode for the KNN graph construction.
+            Default is "distance" (euclidean).
+        sim_features (list[str] | None): List of feature column names to use for similarity
+            computation. If None, uses all columns. Default is None.
+
+    Returns:
+        tuple[nx.Graph, npt.NDArray[np.float32]]: Tuple containing:
+        - NetworkX graph with KNN connections and distance-based edge weights
+        - Array of edge weights from the KNN graph
+    """
     # compute knn-graph based on feature selection
     if sim_features is None or len(sim_features) == 0:
         knn_graph = kneighbors_graph(df, n_neighbors=n_neighbors, mode=mode)
