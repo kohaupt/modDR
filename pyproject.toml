@@ -1,24 +1,20 @@
 [build-system]
-requires = ["setuptools>=61.0"]
-requires-python = ">=3.10"
-build-backend = "setuptools.build_meta"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [project]
-name = "modDR"
-version = "0.1.0"
-requires-python = ">=3.10"
+name = "moddr"
+version = "0.0.1"
 description = "Python Boilerplate contains all the boilerplate you need to create a Python package."
-readme = "README.rst"
+readme = "README.md"
 authors = [
-    { name = "Konstantin Haupt", email = "konstantin.haupt@study.hs-duesseldorf.de" }
-]
-maintainers = [
     { name = "Konstantin Haupt", email = "konstantin.haupt@study.hs-duesseldorf.de" }
 ]
 classifiers = [
 
 ]
-license = { text = "MIT license" }
+
+requires-python = ">=3.10"
 dependencies = [
 
 ]
@@ -32,22 +28,16 @@ dev = [
 ]
 
 [project.urls]
+homepage = "https://github.com/kohaupt/moddr"
 
-bugs = "https://github.com/kohaupt/modDR/issues"
-changelog = "https://github.com/kohaupt/modDR/blob/master/changelog.md"
-homepage = "https://github.com/kohaupt/modDR"
-
-[tool.setuptools]
-package-dir = { "" = "src" }
-
-[tool.setuptools.package-data]
-"*" = ["*.*"]
+[tool.hatch.build.targets.wheel]
+include = ["moddr/**"]
 
 # Ruff
 # ----
 
 [tool.ruff]
-line-length = 88  # oder was du brauchst
+line-length = 88
 
 [tool.ruff.lint]
 select = [
@@ -68,34 +58,10 @@ select = [
 ]
 extend-select = ["E501"]
 
-
-# Mypy
-# ----
-
-[tool.mypy]
-files = "."
-
-# Use strict defaults
-strict = true
-warn_unreachable = true
-warn_no_return = true
-
-[[tool.mypy.overrides]]
-# Don't require test functions to include types
-module = "tests.*"
-allow_untyped_defs = true
-disable_error_code = ["attr-defined", "import-untyped"]
-
-[[tool.mypy.overrides]]
-module = "src.*"
-disable_error_code = ["import-untyped"]
-
-
 [dependency-groups]
 dev = [
     "bokeh>=3.4.3",
     "colorcet>=3.1.0",
-    "cython>=3.0.12",
     "dash>=2.18.2",
     "datashader>=0.17.0",
     "holoviews>=1.20.1",

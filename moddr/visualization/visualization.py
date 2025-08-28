@@ -7,8 +7,8 @@ import numpy as np
 import pandas as pd
 import seaborn as sb
 
-import processing
-from embeddingstate import EmbeddingState
+from .. import processing
+from ..embedding_state import EmbeddingState
 
 
 def display_embeddings(

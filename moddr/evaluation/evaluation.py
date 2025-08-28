@@ -6,8 +6,8 @@ import numpy.typing as npt
 import pandas as pd
 from scipy.spatial.distance import squareform
 
-import processing
-from embeddingstate import EmbeddingState
+from .. import processing
+from ..embedding_state import EmbeddingState
 
 
 def compute_kruskal_stress(
@@ -31,7 +31,7 @@ def compute_kruskal_stress(
         higher = worse).
 
     Raises:
-        ValueError: If the input arrays have different shapes.
+        ValueError: If the input arrays have different shapes or have non-zero off-diagonal elements.
     """
     if dists_highdim.shape != dists_lowdim.shape:
         raise ValueError(
@@ -41,9 +41,18 @@ def compute_kruskal_stress(
 
     # convert to vector form if necessary as distances must not be used more than once
     if dists_highdim.ndim != 1:
+        if not np.allclose(np.diag(dists_highdim), 0):
+            raise ValueError(
+                "Input must be a square distance matrix with zeros on the diagonal."
+            )
+
         dists_highdim = squareform(dists_highdim)
 
     if dists_lowdim.ndim != 1:
+        if not np.allclose(np.diag(dists_lowdim), 0):
+            raise ValueError(
+                "Input must be a square distance matrix with zeros on the diagonal."
+            )
         dists_lowdim = squareform(dists_lowdim)
 
     if not dists_highdim.any():
@@ -85,7 +94,7 @@ def compute_kruskal_stress_partition(
         float: The average Kruskal stress across all communities with at least 2 nodes.
 
     Raises:
-        ValueError: If the input distance arrays have different shapes.
+        ValueError: If the input arrays have different shapes or have non-zero off-diagonal elements.
     """
     if dists_highdim.shape != dists_lowdim.shape:
         raise ValueError(
@@ -96,8 +105,18 @@ def compute_kruskal_stress_partition(
     # convert to square form if necessary, as extraction of distances requires 2D arrays
     if dists_highdim.ndim != 2:
         dists_highdim = squareform(dists_highdim)
+    else:
+        if not np.allclose(np.diag(dists_highdim), 0):
+            raise ValueError(
+                "Input must be a square distance matrix with zeros on the diagonal."
+            )
     if dists_lowdim.ndim != 2:
         dists_lowdim = squareform(dists_lowdim)
+    else:
+        if not np.allclose(np.diag(dists_lowdim), 0):
+            raise ValueError(
+                "Input must be a square distance matrix with zeros on the diagonal."
+            )
 
     # accumulated sum of Kruskal stress for each community
     kruskal_com = 0.0
@@ -117,8 +136,8 @@ def compute_kruskal_stress_partition(
         dists_lowdim_com = np.take(dists_lowdim_com, community_nodes, axis=1)
 
         # convert to condensed form
-        dists_highdim_com = squareform(dists_highdim_com)
-        dists_lowdim_com = squareform(dists_lowdim_com)
+        # dists_highdim_com = squareform(dists_highdim_com)
+        # dists_lowdim_com = squareform(dists_lowdim_com)
 
         kruskal_com += compute_kruskal_stress(dists_highdim_com, dists_lowdim_com)
         community_count += 1
@@ -127,7 +146,7 @@ def compute_kruskal_stress_partition(
     return kruskal_com / community_count
 
 
-def coranking_matrix(
+def compute_coranking_matrix(
     r1: npt.NDArray[np.int32], r2: npt.NDArray[np.int32]
 ) -> npt.NDArray[np.int32]:
     """Compute the co-ranking matrix between two ranking arrays.
@@ -460,7 +479,7 @@ def compute_metrics(
         rank_lowdim = [np.argsort(np.argsort(row)) for row in dists_lowdim]
 
         if ranking_metrics:
-            cr_matrix = coranking_matrix(
+            cr_matrix = compute_coranking_matrix(
                 np.asarray(rank_highdim, dtype=int),
                 np.asarray(rank_lowdim, dtype=int),
             )

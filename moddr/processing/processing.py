@@ -15,8 +15,8 @@ from sklearn.manifold import MDS
 from sklearn.neighbors import kneighbors_graph
 from sklearn.preprocessing import MinMaxScaler
 
-import evaluation
-from embeddingstate import EmbeddingState
+from .. import evaluation
+from ..embedding_state import EmbeddingState
 
 
 def run_pipeline(
@@ -33,7 +33,7 @@ def run_pipeline(
     compute_metrics: bool = True,
     verbose: bool = False,
 ) -> list[EmbeddingState]:
-    """Run the complete modDR (modified Dimensionality Reduction) pipeline.
+    """Run the complete moddr (modified Dimensionality Reduction) pipeline.
 
     This function orchestrates the entire pipeline including dimensionality reduction,
     feature similarity computation, graph construction, community detection, and
@@ -74,7 +74,7 @@ def run_pipeline(
     if verbose:
         print("------------------------------------------------------------")
         print(
-            "Start modDR pipeline with the following parameters:\n"
+            "Start moddr pipeline with the following parameters:\n"
             f"Similarity Features: {sim_features if sim_features else 'all features'}\n"
             f"Dimensionality Reduction Method: {dr_method} with {dr_param_n_neigbors} neighbors\n"  # noqa: E501
             f"Graph Construction Method: {graph_method}\n"
