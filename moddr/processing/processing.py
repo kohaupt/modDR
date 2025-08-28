@@ -26,7 +26,7 @@ def run_pipeline(
     dr_param_n_neigbors: int = 15,
     graph_method: str = "DR",
     community_resolutions: list[float] = None,
-    community_resolution_amount: int = 5,
+    community_resolution_amount: int = 3,
     layout_method: str = "MDS",
     boundary_neighbors: bool = False,
     layout_params: list[int] | None = None,
@@ -199,7 +199,7 @@ def run_pipeline(
         # for MDS & KK-layout, iterate over balance factors in layout_params
         elif layout_method == "MDS" or layout_method == "KK":
             if layout_params is None:
-                layout_params = [0.2, 0.4, 0.6, 0.8, 1.0]
+                layout_params = [0.5]
             elif not all(0 <= x <= 1 for x in layout_params):
                 raise ValueError("The balance factors must be between 0 and 1.")
 
@@ -493,11 +493,15 @@ def community_detection_leiden(
         returns a deep copy of the input embedding.
 
     Raises:
-        ValueError: If the embedding object doesn't have a graph.
+        ValueError: If the embedding object doesn't have a graph or edge weights.
     """
 
     if embedding.graph is None:
         raise ValueError("Embedding object must have a similarity graph.")
+
+    edge_weights = list(nx.get_edge_attributes(embedding.graph, "weight").values())
+    if len(edge_weights) == 0:
+        raise ValueError(f"Graph of embedding {embedding.obj_id} has no edge weights.")
 
     if verbose:
         print("------------------------------------------------------------")
@@ -613,7 +617,7 @@ def compute_modified_positions(
     boundary_neighbors: bool = False,
     inplace: bool = False,
     verbose: bool = False,
-) -> tuple[EmbeddingState, npt.NDArray[np.float32]]:
+) -> tuple[EmbeddingState, dict[int, npt.NDArray[np.float32]]]:
     """Compute new positions for an embedding using various layout algorithms.
 
     This function applies different layout algorithms (Kamada-Kawai, MDS, or
@@ -633,9 +637,9 @@ def compute_modified_positions(
         verbose (bool): Whether to print progress information. Default is False.
 
     Returns:
-        tuple[EmbeddingState, npt.NDArray[np.float32]]: Tuple containing:
+        tuple[EmbeddingState, dict[int, npt.NDArray[np.float32]]]: Tuple containing:
         - Modified EmbeddingState object
-        - Array of modified positions as computed by the layout algorithm (w/o balance factor influence)
+        - Dictionary of modified positions as computed by the layout algorithm (w/o balance factor influence)
 
     Raises:
         ValueError: If unsupported layout method is specified or required
@@ -643,6 +647,14 @@ def compute_modified_positions(
     """
     if not inplace:
         embedding = copy.deepcopy(embedding)
+
+    if targets.ndim == 2 and not np.allclose(np.diag(targets), 0):
+        raise ValueError(
+            "Input must be a square distance matrix with zeros on the diagonal."
+        )
+
+    if targets.ndim == 1:
+        targets = squareform(targets)
 
     if verbose:
         print("------------------------------------------------------------")
@@ -663,10 +675,10 @@ def compute_modified_positions(
         embedding_df = pd.DataFrame(embedding.embedding.values(), index=None)
         embedding_dists = compute_pairwise_dists(
             embedding_df,
-            apply_squareform=False,
+            apply_squareform=True,
         )
 
-        target_scaling = compute_distance_scaling(embedding_dists, squareform(targets))
+        target_scaling = compute_distance_scaling(embedding_dists, targets)
         targets = targets * target_scaling
 
     if layout_method == "KK":
@@ -712,6 +724,9 @@ def compute_modified_positions(
             else None,
             verbose=verbose,
         )
+        # as fr doesn't use a balance factor,
+        # computed_positions is equal to the modified positions
+        computed_positions = embedding.embedding.copy()
 
         embedding.title += f", FR layouting (iterations: {layout_param})"
         embedding.metadata["layout_method"] = "FR"
@@ -837,7 +852,7 @@ def compute_kamada_kawai_layout(
 
     embedding.embedding = updated_pos_dict_scaled
 
-    return embedding
+    return embedding, updated_pos_dict
 
 
 def compute_mds_layout(
@@ -992,6 +1007,7 @@ def compute_fruchterman_reingold_layout(
     for part_key, part_graph in partition_subgraphs.items():
         subgraph_pos = {node: embedding.embedding[node] for node in part_graph.nodes}
 
+        print(partition_subgraphs.keys())
         subgraph_updated_pos = nx.spring_layout(
             part_graph,
             pos=subgraph_pos,
@@ -1046,8 +1062,6 @@ def compute_distance_scaling(
     # convert to vector form if necessary as distances must not be used more than once
     if dists_highdim.ndim != 1:
         dists_highdim = squareform(dists_highdim)
-
-    if dists_lowdim.ndim != 1:
         dists_lowdim = squareform(dists_lowdim)
 
     if not dists_highdim.any():
@@ -1095,7 +1109,7 @@ def compute_community_graphs(
             [
                 node
                 for node, attrs_dict in embedding.graph.nodes(data=True)
-                if attrs_dict["community"] == part
+                if node in nodes
             ]
         ).copy()
 

@@ -153,15 +153,15 @@ class EmbeddingState:
         )
 
         self.metrics = MetricsDict(
-            trustworthiness=0.0,
-            continuity=0.0,
-            rnx=0.0,
-            sim_stress=0.0,
-            sim_stress_com=0.0,
-            sim_stress_com_diff=0.0,
-            rank_score=0.0,
-            distance_score=0.0,
-            total_score=0.0,
+            trustworthiness=None,
+            continuity=None,
+            rnx=None,
+            sim_stress=None,
+            sim_stress_com=None,
+            sim_stress_com_diff=None,
+            rank_score=None,
+            distance_score=None,
+            total_score=None,
             coranking_matrix=None,
         )
 
@@ -170,7 +170,7 @@ class EmbeddingState:
             "---------------------------------------\n"
             f"Embedding object (ID: {self.obj_id})\n"
             f"Title: '{self.title}'\n"
-            f"Embedding shape: {len(self.embedding.items()) if self.embedding else 0}\n"
+            f"Embedding size: {len(self.embedding.items()) if self.embedding else 0}\n"
             f"Graph nodes: {self.graph.number_of_nodes() if self.graph else 0}\n"
             f"Graph edges: {self.graph.number_of_edges() if self.graph else 0}\n\n"
             f"Metadata: \n  {'\n  '.join(f'{k}: {v}' for k, v in self.metadata.items())}\n\n"  # noqa: E501

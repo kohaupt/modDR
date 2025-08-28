@@ -40,7 +40,7 @@ def compute_kruskal_stress(
         )
 
     # convert to vector form if necessary as distances must not be used more than once
-    if dists_highdim.ndim != 1:
+    if dists_highdim.ndim == 2:
         if not np.allclose(np.diag(dists_highdim), 0):
             raise ValueError(
                 "Input must be a square distance matrix with zeros on the diagonal."
@@ -48,7 +48,7 @@ def compute_kruskal_stress(
 
         dists_highdim = squareform(dists_highdim)
 
-    if dists_lowdim.ndim != 1:
+    if dists_lowdim.ndim == 2:
         if not np.allclose(np.diag(dists_lowdim), 0):
             raise ValueError(
                 "Input must be a square distance matrix with zeros on the diagonal."
@@ -346,7 +346,7 @@ def compute_dist_score(embedding: EmbeddingState) -> float:
             metrics dictionary.
     """
     required_keys = ["sim_stress", "sim_stress_com_diff"]
-    if not all(metric in embedding.metrics for metric in required_keys):
+    if any(embedding.metrics.get(x) is None for x in required_keys):
         raise ValueError(
             "All of the following metrics must be computed to compute the distance score:"  # noqa: E501
             "`sim_stress`, `sim_stress_com_diff`."
@@ -387,7 +387,7 @@ def compute_total_score(
             'distance_score') are missing from the embedding's metrics dictionary.
     """
     required_keys = ["rank_score", "distance_score"]
-    if not all(metric in embedding.metrics for metric in required_keys):
+    if any(embedding.metrics.get(x) is None for x in required_keys):
         raise ValueError(
             "All of the following metrics must be computed to compute the total score:"
             "`rank_score`, `distance_score`."
