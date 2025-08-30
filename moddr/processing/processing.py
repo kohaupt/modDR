@@ -11,6 +11,7 @@ import pandas as pd
 import umap
 from igraph import Graph
 from scipy.spatial.distance import pdist, squareform
+from sklearn.decomposition import PCA
 from sklearn.manifold import MDS
 from sklearn.neighbors import kneighbors_graph
 from sklearn.preprocessing import MinMaxScaler
@@ -23,7 +24,7 @@ def run_pipeline(
     data: pd.DataFrame,
     sim_features: list[str],
     dr_method: str = "UMAP",
-    dr_param_n_neigbors: int = 15,
+    dr_param_n_neighbors: int = 15,
     graph_method: str = "DR",
     community_resolutions: list[float] = None,
     community_resolution_amount: int = 3,
@@ -76,7 +77,7 @@ def run_pipeline(
         print(
             "Start moddr pipeline with the following parameters:\n"
             f"Similarity Features: {sim_features if sim_features else 'all features'}\n"
-            f"Dimensionality Reduction Method: {dr_method} with {dr_param_n_neigbors} neighbors\n"  # noqa: E501
+            f"Dimensionality Reduction Method: {dr_method} with {dr_param_n_neighbors} neighbors\n"  # noqa: E501
             f"Graph Construction Method: {graph_method}\n"
             f"Community Detection Resolutions: {community_resolutions if community_resolutions else 'automatic'}\n"  # noqa: E501
             f"Layout Method: {layout_method}\n"
@@ -88,7 +89,9 @@ def run_pipeline(
 
     # 1. Step: dimensionality reduction
     if dr_method == "UMAP":
-        reference = dimensionality_reduction_umap(data, n_neighbors=dr_param_n_neigbors)
+        reference = dimensionality_reduction_umap(
+            data, n_neighbors=dr_param_n_neighbors
+        )
     else:
         raise ValueError(
             f"Method '{dr_method}' is not supported. Currently, only 'UMAP' is available."  # noqa: E501
@@ -100,6 +103,12 @@ def run_pipeline(
     scaler = MinMaxScaler()
     for col in sim_features:
         data_scaled[col] = scaler.fit_transform(data[[col]])
+
+    # set labels as PCA components as marker of similarity
+    sim_features_reduced = PCA(n_components=1).fit_transform(data_scaled[sim_features])
+    reference.labels = {
+        i: sim_features_reduced[i] for i in range(len(sim_features_reduced))
+    }
 
     # use pairwise distances for kamada kawai and mds layouts
     if layout_method == "KK" or layout_method == "MDS":
@@ -604,7 +613,7 @@ def apply_balance_factor(
         }
     )
 
-    embedding.metadata["layout_params"]["balance factor"] = balance_factor
+    embedding.metadata["layout_params"]["balance_factor"] = balance_factor
 
     return embedding
 
@@ -695,7 +704,7 @@ def compute_modified_positions(
 
         embedding.title += f", KK (balance factor: {layout_param})"
         embedding.metadata["layout_method"] = "KK"
-        embedding.metadata["layout_params"]["balance factor"] = layout_param
+        embedding.metadata["layout_params"]["balance_factor"] = layout_param
 
     elif layout_method == "MDS":
         embedding, computed_positions = compute_mds_layout(
@@ -711,7 +720,7 @@ def compute_modified_positions(
 
         embedding.title += f", MDS (balance factor: {layout_param})"
         embedding.metadata["layout_method"] = "MDS"
-        embedding.metadata["layout_params"]["balance factor"] = layout_param
+        embedding.metadata["layout_params"]["balance_factor"] = layout_param
 
     elif layout_method == "FR":
         embedding = compute_fruchterman_reingold_layout(
@@ -1007,7 +1016,6 @@ def compute_fruchterman_reingold_layout(
     for part_key, part_graph in partition_subgraphs.items():
         subgraph_pos = {node: embedding.embedding[node] for node in part_graph.nodes}
 
-        print(partition_subgraphs.keys())
         subgraph_updated_pos = nx.spring_layout(
             part_graph,
             pos=subgraph_pos,
