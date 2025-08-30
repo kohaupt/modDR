@@ -829,10 +829,9 @@ def compute_kamada_kawai_layout(
                 }
             )
 
-        subdist = {
-            u: {v: float(pairwise_dists[u][v]) for v in part_graph.neighbors(u)}
-            for u in part_graph.nodes
-        }
+        subdist = pairwise_dists[
+            np.ix_(list(subgraph_pos.keys()), list(subgraph_pos.keys()))
+        ]
 
         new_post_dict = nx.kamada_kawai_layout(
             part_graph,
