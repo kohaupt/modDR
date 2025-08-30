@@ -169,7 +169,7 @@ def test_compute_modified_positions_unbalanced(sample_embedding_state, sample_da
     assert isinstance(emb, type(sample_embedding_state))
     assert emb.embedding is not None
     assert emb.metadata["layout_method"] == "MDS"
-    assert emb.metadata["layout_params"]["balance factor"] == 1.0
+    assert emb.metadata["layout_params"]["balance_factor"] == 1.0
     assert modified_positions is not None
 
     targets_mod = pdist(np.array(list(modified_positions.values())), metric="euclidean")
@@ -195,7 +195,7 @@ def test_compute_modified_positions_mds(sample_embedding_state, sample_data):
     assert isinstance(emb, type(sample_embedding_state))
     assert emb.embedding is not None
     assert emb.metadata["layout_method"] == "MDS"
-    assert emb.metadata["layout_params"]["balance factor"] == 0.5
+    assert emb.metadata["layout_params"]["balance_factor"] == 0.5
     assert modified_positions is not None
 
     targets_mod = pdist(np.array(list(modified_positions.values())), metric="euclidean")
@@ -221,7 +221,7 @@ def test_compute_modified_positions_kk(sample_embedding_state, sample_data):
     assert isinstance(emb, type(sample_embedding_state))
     assert emb.embedding is not None
     assert emb.metadata["layout_method"] == "KK"
-    assert emb.metadata["layout_params"]["balance factor"] == 0.5
+    assert emb.metadata["layout_params"]["balance_factor"] == 0.5
     assert modified_positions is not None
 
     targets_mod = pdist(np.array(list(modified_positions.values())), metric="euclidean")

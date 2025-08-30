@@ -84,11 +84,11 @@ def display_embeddings(
 
             # fallback to labels or default color if no node color attribute is set
             if len(node_colors) == 0:
-                if embeddings[i].labels is not None:
+                if (
+                    embeddings[i].labels is not None
+                    and len(embeddings[i].labels) == graph.number_of_nodes()
+                ):
                     node_colors = [embeddings[i].labels[n] for n in graph.nodes()]
-                    print(
-                        f"INFO for embedding {embeddings[i].obj_id}: Using labels as node colors."  # noqa: E501
-                    )
                 else:
                     node_colors = [0] * graph.number_of_nodes()
 
@@ -332,7 +332,10 @@ def plot_community_graphs(
                     )
 
             if len(node_colors_dict.items()) == 0:
-                if embeddings[i].labels is not None:
+                if (
+                    embeddings[i].labels is not None
+                    and len(embeddings[i].labels) == graph.number_of_nodes()
+                ):
                     node_colors_dict = {
                         n: embeddings[i].labels[n] for n in graph.nodes()
                     }
@@ -691,7 +694,7 @@ def plot_pos_movements(
             c=list(target.labels.values()),
             cmap=plt.cm.viridis,
             zorder=3,
-            s=20,
+            s=40,
         )
 
     all_x = np.concatenate([coords_source[:, 0], coords_target[:, 0]])
