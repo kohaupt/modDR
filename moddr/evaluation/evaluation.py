@@ -1,3 +1,22 @@
+"""Evaluation metrics for dimensionality reduction quality assessment.
+
+This module provides evaluation functions for assessing the quality
+of dimensionality reduction embeddings. It includes both ranking-based and
+distance-based metrics to evaluate how well the low-dimensional representation
+preserves the structure and relationships from the high-dimensional space.
+
+The implementation includes adaptations from the pyDRMetrics package by
+Yinsheng Zhang, with optimizations for runtime efficiency and integration
+with the moddr pipeline.
+
+References:
+    - Zhang, Y. pyDRMetrics: A Python package for dimensionality reduction
+      quality metrics. https://github.com/zhangys11/pyDRMetrics
+    - Lee, J. A., et al. "Type 1 and 2 mixtures of Kullback–Leibler divergences
+      as cost functions in dimensionality reduction based on similarity
+      preservation." Neurocomputing 112 (2013): 92-108.
+"""
+
 import copy
 import time
 

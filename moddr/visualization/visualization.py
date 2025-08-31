@@ -1,3 +1,10 @@
+"""Visualization tools for dimensionality reduction embeddings and analysis.
+
+This module provides visualization capabilities for the moddr package,
+enabling the creation of plots for embedding analysis, community visualization,
+and comparative evaluation of dimensionality reduction results.
+"""
+
 import math
 
 import matplotlib as mpl

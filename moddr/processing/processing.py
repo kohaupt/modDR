@@ -1,3 +1,21 @@
+"""Processing pipeline for modified dimensionality reduction (moddr).
+
+This module provides the core processing functionality for the moddr package,
+implementing a pipeline for modified dimensionality reduction with
+community detection and position refinement.
+
+Pipeline Stages:
+1. Dimensionality Reduction: UMAP-based reduction to 2D space
+2. Feature Similarity: Computation of pairwise similarities based on target features
+3. Graph Construction: Creation of neighborhood graphs from DR results or KNN
+4. Community Detection: Leiden algorithm for community identification
+5. Position Refinement: Layout algorithms (MDS, Kamada-Kawai, Fruchterman-Reingold)
+6. Metrics Computation: Quality assessment of the final embeddings
+
+The module supports both individual function usage and complete pipeline
+execution through the `run_pipeline` function.
+"""
+
 import copy
 import time
 import warnings
