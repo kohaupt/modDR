@@ -1,5 +1,5 @@
 Documentation for the package modDR (modified Dimensionality Reduction)
-================================
+=======================================================================
 
 Modified Dimensionality Reduction (moddr) is a Python package for combining dimensionality reduction techniques with community detection and visualization capabilities. This package presents a method for automatically modifying the positions of data points in low-dimensional spaces based on a feature selection to preserve both global structure and feature-driven similarity. The provided workflow uses graph theory concepts and layout methods to change the arrangement of a given DR-positioning in such a way that an additional similarity measure – based on selected features, for example – is integrated into the distance structure.
 
@@ -70,7 +70,6 @@ An instance of the ``EmbeddingState``-class allows you to access all computed in
 
 .. toctree::
    :maxdepth: 2
-   :caption: Contents:
    :titlesonly:
 
-   api
+   API Reference <api_index>
