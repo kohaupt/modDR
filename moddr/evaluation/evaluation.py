@@ -531,7 +531,7 @@ def compute_metrics(
                 emb.metrics["rnx"] = compute_rnx(qnn, fixed_k)
             # compute AUC values (mean over all ks) if fixed_k is not set
             else:
-                for k in range(1, n):
+                for k in range(1, n - 1):
                     trustworthiness[k - 1] = compute_trustworthiness(cr_matrix, k)
                     continuity[k - 1] = compute_continuity(cr_matrix, k)
                     r_quality[k - 1] = compute_rnx(qnn, k)
