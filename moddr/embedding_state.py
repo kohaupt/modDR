@@ -166,6 +166,9 @@ class EmbeddingState:
         )
 
     def __str__(self) -> str:
+        metadata_str = "\n  ".join(f"{k}: {v}" for k, v in self.metadata.items())
+        metrics_str = "\n  ".join(f"{k}: {v}" for k, v in self.metrics.items())
+
         return (
             "---------------------------------------\n"
             f"Embedding object (ID: {self.obj_id})\n"
@@ -173,7 +176,7 @@ class EmbeddingState:
             f"Embedding size: {len(self.embedding.items()) if self.embedding else 0}\n"
             f"Graph nodes: {self.graph.number_of_nodes() if self.graph else 0}\n"
             f"Graph edges: {self.graph.number_of_edges() if self.graph else 0}\n\n"
-            f"Metadata: \n  {'\n  '.join(f'{k}: {v}' for k, v in self.metadata.items())}\n\n"  # noqa: E501
-            f"Metrics: \n  {'\n  '.join(f'{k}: {v}' for k, v in self.metrics.items())}\n"  # noqa: E501
+            f"Metadata: \n  {metadata_str}\n\n"
+            f"Metrics: \n  {metrics_str}\n"
             "---------------------------------------"
         )
