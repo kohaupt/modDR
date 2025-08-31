@@ -1,13 +1,13 @@
 # modDR (modified Dimensionality Reduction)
 
 [![PyPI version](https://img.shields.io/pypi/v/moddr.svg)](https://pypi.python.org/pypi/moddr)
-[![Documentation Status](https://readthedocs.org/projects/moddr/badge/?version=latest)](https://moddr.readthedocs.io/en/latest/?version=latest)
+[![Documentation Status](https://readthedocs.org/projects/moddr/badge/?version=latest)](https://moddr.readthedocs.io/en/latest/)
 
 Modified Dimensionality Reduction (moddr) is a Python package for combining dimensionality reduction techniques with community detection and visualization capabilities.
 This package presents a method for automatically modifying the positions of data points in low-dimensional spaces based on a feature selection to preserve both global structure and feature-driven similarity. The provided workflow uses graph theory concepts and layout methods to change the arrangement of a given DR-positioning in such a way that an additional similarity measure – based on selected features, for example – is integrated into the distance structure. 
 
 ## Documentation
-Full documentation is available at: https://moddr.readthedocs.io.
+Full documentation is available at: https://moddr.readthedocs.io
 
 ## Installation
 The package is published on PyPI: https://pypi.python.org/pypi/moddr 
@@ -27,7 +27,7 @@ uv add moddr
 The package was developed with the [uv package manager](https://docs.astral.sh/uv/), which is required for local development. After cloning the repository, run the following steps to create a working development environment (if not inside an existing workspace):
 
 ```bash
-uv init <<project-name>>
+uv init project-name
 uv sync
 uv pip install -e .
 ```
