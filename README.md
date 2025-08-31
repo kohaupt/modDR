@@ -1,49 +1,62 @@
-# moddr
+# modDR (modified Dimensionality Reduction)
 
 [![PyPI version](https://img.shields.io/pypi/v/moddr.svg)](https://pypi.python.org/pypi/moddr)
-[![Build Status](https://img.shields.io/travis/kohaupt/moddr.svg)](https://travis-ci.com/kohaupt/moddr)
 [![Documentation Status](https://readthedocs.org/projects/moddr/badge/?version=latest)](https://moddr.readthedocs.io/en/latest/?version=latest)
 
-Modified Dimensionality Reduction (moddr) is a Python package for advanced dimensionality reduction techniques with community detection and visualization capabilities.
+Modified Dimensionality Reduction (moddr) is a Python package for combining dimensionality reduction techniques with community detection and visualization capabilities.
+This package presents a method for automatically modifying the positions of data points in low-dimensional spaces based on a feature selection to preserve both global structure and feature-driven similarity. The provided workflow uses graph theory concepts and layout methods to change the arrangement of a given DR-positioning in such a way that an additional similarity measure – based on selected features, for example – is integrated into the distance structure. 
 
-- **Free software:** MIT license
-- **Documentation:** https://moddr.readthedocs.io
-
-## Features
-
-- Dimensionality reduction using UMAP
-- Community detection with Leiden algorithm
-- Multiple graph layout algorithms (Kamada-Kawai, MDS, Fruchterman-Reingold)
-- Comprehensive evaluation metrics for dimensionality reduction quality
-- Advanced visualization tools for embeddings and communities
-- Pipeline framework for reproducible experiments
+## Documentation
+Full documentation is available at: https://moddr.readthedocs.io.
 
 ## Installation
+The package is published on PyPI: https://pypi.python.org/pypi/moddr 
 
+Install it via:
 ```bash
 pip install moddr
 ```
 
-## Quick Start
+or, if you are using the [uv package manager](https://docs.astral.sh/uv/):
 
-```python
-from moddr.processing import run_pipeline
-from moddr.evaluation import compute_metrics
-from moddr.visualization import display_embeddings
-
-# Run the full moddr pipeline
-embeddings = run_pipeline(
-    data=your_data,
-    pipeline_config=config
-)
-
-# Evaluate the results
-metrics = compute_metrics(embeddings)
-
-# Visualize the embeddings
-display_embeddings(embeddings)
+```bash
+uv add moddr
 ```
 
-## Credits
+## Development
+The package was developed with the [uv package manager](https://docs.astral.sh/uv/), which is required for local development. After cloning the repository, run the following steps to create a working development environment (if not inside an existing workspace):
 
-This package was created with [Cookiecutter](https://github.com/audreyr/cookiecutter) and the [audreyr/cookiecutter-pypackage](https://github.com/audreyr/cookiecutter-pypackage) project template.
+```bash
+uv init <<project-name>>
+uv sync
+uv pip install -e .
+```
+
+The command `uv pip install -e .` is mandatory to make the package functions available locally. You can test the correct local installation by running:
+
+```bash
+uv run pytest
+```
+
+## Quick Start
+The package consists of three modules:
+- `processing` – computing modified embeddings
+- `evaluation` – computing metrics for evaluation
+- `visualization` – visualizing embeddings
+
+An instance of the `EmbeddingState`-class allows you to access all computed information. Examples are available under `./examples` as jupyter-notebooks. A minimal example can be implemented as follows. The parameters may have to be adjusted for the used data set, as the default parameters may not be suited.
+
+
+```python
+import moddr
+
+# Run the full moddr pipeline
+embeddings = moddr.processing.run_pipeline(
+    data=your_data,
+    sim_features=your_feature_selection
+    verbose=True
+)
+
+# Visualize the embeddings
+moddr.visualization.display_embeddings(embeddings)
+```

@@ -1,4 +1,4 @@
-Welcome to master_thesis's documentation!
+Welcome to moddr's documentation!
 ======================================
 
 .. toctree::
