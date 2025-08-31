@@ -5,30 +5,58 @@ build-backend = "hatchling.build"
 [project]
 name = "moddr"
 version = "0.0.1"
-description = "Python Boilerplate contains all the boilerplate you need to create a Python package."
+description = "This package allows the refinement of DR-based positions with respect to certain data features."
 readme = "README.md"
+license = { file = "LICENSE" }
 authors = [
     { name = "Konstantin Haupt", email = "konstantin.haupt@study.hs-duesseldorf.de" }
 ]
 classifiers = [
-
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX",
+    "Operating System :: Unix",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
 ]
 
 requires-python = ">=3.10"
 dependencies = [
-
+    "bokeh>=3.4.3",
+    "colorcet>=3.1.0",
+    "dash>=2.18.2",
+    "datashader>=0.17.0",
+    "holoviews>=1.20.1",
+    "igraph>=0.11.9",
+    "leidenalg>=0.10.2",
+    "matplotlib>=3.9.4",
+    "nbformat>=5.10.4",
+    "networkx>=3.0",
+    "numpy==1.26.0",
+    "pandas>=2.2.3",
+    "scikit-image>=0.24.0",
+    "scikit-learn>=1.6.1",
+    "seaborn>=0.13.2",
+    "umap-learn>=0.5.7",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "coverage", # testing
-    "mypy", # linting
-    "pytest", # testing
-    "ruff"  # linting
+    "pytest>=8.3.4",
+    "ipykernel>=6.29.5",
+    "ipywidgets>=8.1.5",
+    "pip>=25.0.1",
+    "ucimlrepo>=0.0.7",
+    "uv>=0.5.26",
 ]
 
 [project.urls]
-homepage = "https://github.com/kohaupt/moddr"
+Homepage = "https://github.com/kohaupt/moddr"
+Repository = "https://github.com/kohaupt/moddr"
+Issues = "https://github.com/kohaupt/moddr/issues"
 
 [tool.hatch.build.targets.wheel]
 include = ["moddr/**"]
@@ -41,20 +69,13 @@ line-length = 88
 
 [tool.ruff.lint]
 select = [
-    # pycodestyle
-    "E",
-    # Pyflakes
-    "F",
-    # pyupgrade
-    "UP",
-    # flake8-bugbear
-    "B",
-    # flake8-simplify
-    "SIM",
-    # isort
-    "I",
-    # pep8-naming
-    "N",
+    "E",   # pycodestyle
+    "F",   # Pyflakes
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "SIM", # flake8-simplify
+    "I",   # isort
+    "N",   # pep8-naming
 ]
 extend-select = ["E501"]
 
@@ -65,20 +86,17 @@ dev = [
     "dash>=2.18.2",
     "datashader>=0.17.0",
     "holoviews>=1.20.1",
-    "idx2numpy>=1.2.3",
     "igraph>=0.11.9",
     "ipykernel>=6.29.5",
     "ipywidgets>=8.1.5",
     "latex>=0.7.0",
     "leidenalg>=0.10.2",
     "matplotlib>=3.9.4",
-    "mypy>=1.15.0",
     "nbformat>=5.10.4",
     "networkx>=3.0",
     "numpy==1.26.0",
     "pandas>=2.2.3",
     "pip>=25.0.1",
-    "pydrmetrics>=0.0.7",
     "pytest>=8.3.4",
     "scikit-image>=0.24.0",
     "scikit-learn>=1.6.1",
