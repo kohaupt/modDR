@@ -82,6 +82,9 @@ select = [
 ]
 extend-select = ["E501"]
 
+[tool.uv.sources]
+moddr = { workspace = true }
+
 [dependency-groups]
 dev = [
     "bokeh>=3.4.3",

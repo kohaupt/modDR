@@ -24,15 +24,15 @@ uv add moddr
 ```
 
 ## Development
-The package was developed with the [uv package manager](https://docs.astral.sh/uv/), which is required for local development. After cloning the repository, run the following steps to create a working development environment (if not inside an existing workspace):
+The package was developed with the [uv package manager](https://docs.astral.sh/uv/), which is required for local development. After cloning the repository, run the following commands to create a working development environment (if not inside an existing workspace):
 
 ```bash
 uv init project-name
 uv sync
-uv pip install -e .
+uv pip install -e . # needed to make the package functions available locally
 ```
 
-The command `uv pip install -e .` is mandatory to make the package functions available locally. You can test the correct local installation by running:
+You can test the correct local installation by running:
 
 ```bash
 uv run pytest
